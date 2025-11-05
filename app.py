@@ -1,5 +1,10 @@
-from flask import Flask, render_template, jsonify,Response, abort
+from flask import Flask, render_template, jsonify, Response, abort, request
 import logging
+import time
+import numpy as np
+import cv2
+import os
+from werkzeug.utils import secure_filename
 from config import config
 from models.face_matcher import AdvancedFaceMatcher
 from models.cctv_manager import CCTVManager
@@ -35,7 +40,11 @@ def create_app(config_name='default'):
         
         logger.info("Initializing CCTV Manager...")
         cctv_manager = CCTVManager(app_config)
+        app_config.face_matcher = face_matcher
         
+        # Reload lost persons database now that face_matcher is available
+        cctv_manager.reload_lost_persons_database()
+
     except Exception as e:
         logger.error(f"Failed to initialize components: {e}")
         raise
@@ -43,7 +52,7 @@ def create_app(config_name='default'):
     # Initialize routes with dependencies - PASS app_config NOT app.config
     init_person_routes(app_config, face_matcher)
     init_cctv_routes(app_config, cctv_manager, face_matcher)
-    init_api_routes(app_config, cctv_manager)
+    init_api_routes(app_config, cctv_manager, face_matcher)
     
     # Register blueprints
     app.register_blueprint(person_bp)
@@ -72,8 +81,8 @@ def create_app(config_name='default'):
             except Exception as e:
                 logger.warning(f"Failed to add test stream {stream['name']}: {e}")
 
-    # Add test streams
-    add_test_streams()
+    # Add test streams - commented out to speed up startup for testing
+    # add_test_streams()
     
     def add_webcam_for_testing():
         """Add webcam stream for face detection testing"""
@@ -121,7 +130,85 @@ def create_app(config_name='default'):
         except Exception as e:
             logger.error(f"Error serving frame for {name}: {e}")
             abort(500)
-    # Root route
+    
+    @app.route('/api/cctv/stream/<name>')
+    def video_feed(name):
+        """Continuous MJPEG streaming for real-time video"""
+        def generate():
+            while True:
+                try:
+                    frame = cctv_manager.get_current_frame(name)
+                    if frame:
+                        yield (b'--frame\r\n'
+                               b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+                    time.sleep(0.04)  # ~25 FPS for smooth streaming
+                except Exception as e:
+                    logger.error(f"Error generating MJPEG stream for {name}: {e}")
+                    # Return a placeholder frame on error
+                    placeholder = np.zeros((480, 640, 3), dtype=np.uint8)
+                    cv2.putText(placeholder, "Stream Error", (200, 240), 
+                               cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+                    ret, buffer = cv2.imencode('.jpg', placeholder)
+                    if ret:
+                        yield (b'--frame\r\n'
+                               b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
+                    time.sleep(1)  # Wait before retrying
+        
+        return Response(generate(), mimetype='multipart/x-mixed-replace; boundary=frame')
+    
+    @app.route('/api/lost-person/add', methods=['POST'])
+    def add_lost_person():
+        """API endpoint to add a new lost person to the database"""
+        try:
+            logger.info("Received request to add lost person")
+            
+            if 'image' not in request.files:
+                logger.error("No image file in request")
+                return jsonify({'error': 'No image file provided'}), 400
+            
+            file = request.files['image']
+            if file.filename == '':
+                logger.error("Empty filename")
+                return jsonify({'error': 'No file selected'}), 400
+            
+            name = request.form.get('name', '').strip()
+            if not name:
+                logger.error("No name provided")
+                return jsonify({'error': 'Person name is required'}), 400
+            
+            logger.info(f"Adding lost person: {name}")
+            
+            # Secure the filename
+            filename = secure_filename(f"{name}.jpg")
+            logger.info(f"Secure filename: {filename}")
+            
+            # Save the file temporarily
+            temp_path = os.path.join('data', 'uploads', 'temp', filename)
+            logger.info(f"Temp path: {temp_path}")
+            
+            os.makedirs(os.path.dirname(temp_path), exist_ok=True)
+            file.save(temp_path)
+            logger.info(f"File saved to: {temp_path}")
+            
+            # Add to lost persons database
+            success = cctv_manager.add_lost_person(temp_path, name)
+            logger.info(f"add_lost_person returned: {success}")
+            
+            if success:
+                return jsonify({
+                    'success': True,
+                    'message': f'Lost person {name} added successfully',
+                    'name': name,
+                    'filename': filename
+                })
+            else:
+                return jsonify({'error': 'Failed to process face image. Please ensure the image contains a clear face.'}), 400
+                
+        except Exception as e:
+            logger.error(f"Error adding lost person: {e}", exc_info=True)
+            return jsonify({'error': f'Internal server error: {str(e)}'}), 500
+
+# Root route
     
     
     @app.route('/')

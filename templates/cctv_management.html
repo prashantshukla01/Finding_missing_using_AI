@@ -77,6 +77,32 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- Lost Persons Management -->
+                <div class="card mt-4">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">
+                            <i class="fas fa-user-times"></i> Missing Persons Database
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <button class="btn btn-primary btn-sm" onclick="showAddPersonModal()">
+                                    <i class="fas fa-plus"></i> Add Missing Person
+                                </button>
+                            </div>
+                            <div class="col-md-6 text-end">
+                                <small class="text-muted">Total: <span id="lostPersonsCount">0</span> persons</small>
+                            </div>
+                        </div>
+                        <div id="lostPersonsList" class="mt-3">
+                            <div class="text-center text-muted">
+                                <p>No missing persons in database</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -117,6 +143,44 @@
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
                 <button type="button" class="btn btn-primary" onclick="addStream()">Add Stream</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Add Missing Person Modal -->
+<div class="modal fade" id="addPersonModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Add Missing Person</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="addPersonForm">
+                    <div class="mb-3">
+                        <label for="personName" class="form-label">Person Name *</label>
+                        <input type="text" class="form-control" id="personName" required>
+                        <div class="form-text">Enter the full name of the missing person</div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="personImage" class="form-label">Photo *</label>
+                        <input type="file" class="form-control" id="personImage" accept="image/*" required>
+                        <div class="form-text">Upload a clear photo with the person's face visible</div>
+                    </div>
+                    
+                    <div id="personPreview" class="mb-3" style="display: none;">
+                        <label class="form-label">Preview</label>
+                        <div class="text-center">
+                            <img id="personPreviewImg" class="img-thumbnail" style="max-height: 200px;">
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="addLostPerson()">Add Person</button>
             </div>
         </div>
     </div>
@@ -211,10 +275,36 @@
             // Update stream info
             this.updateStreamInfo(streamName);
             
-            // Start updating frame every 2 seconds
+            // Start MJPEG stream
+            this.startMJPEGStream(streamName);
+            
+            // Keep updating stream info periodically
             this.streamInterval = setInterval(() => {
-                this.updateStreamFrame(streamName);
-            }, 10);
+                this.updateStreamInfo(streamName);
+            }, 2000);
+        }
+        
+        startMJPEGStream(streamName) {
+            const viewer = document.getElementById('streamViewer');
+            const encodedStreamName = encodeURIComponent(streamName);
+            const streamUrl = `/api/cctv/stream/${encodedStreamName}`;
+            
+            viewer.innerHTML = `
+                <div class="position-relative">
+                    <img id="liveStreamImg" 
+                         src="${streamUrl}" 
+                         class="img-fluid rounded" 
+                         alt="Live Stream"
+                         style="max-width: 100%; height: auto;"
+                         onerror="this.onerror=null; this.src='/static/images/stream-error.svg'; this.parentElement.innerHTML='<div class=\'text-center p-5 bg-danger text-white rounded\'><i class=\'fas fa-exclamation-triangle fa-2x mb-3\'></i><h5>Stream Error</h5><p>Failed to connect to stream</p><button class=\'btn btn-light btn-sm mt-2\' onclick=\'cctvUI.retryStream(\"${streamName}\")\'><i class=\'fas fa-redo\'></i> Retry</button></div>';">
+                    <div class="position-absolute top-0 end-0 bg-dark text-white px-2 py-1 m-2 rounded">
+                        <i class="fas fa-circle text-success"></i> LIVE MJPEG
+                    </div>
+                    <div class="position-absolute bottom-0 start-0 bg-dark text-white px-2 py-1 m-2 rounded">
+                        ${new Date().toLocaleTimeString()}
+                    </div>
+                </div>
+            `;
         }
         
         async updateStreamInfo(streamName) {
@@ -235,56 +325,62 @@
             }
         }
         
-async updateStreamFrame(streamName) {
-    try {
-        const frameUrl = `/api/cctv/stream/${encodeURIComponent(streamName)}/frame?${Date.now()}`;
-        const existingImg = document.querySelector('#streamViewer img');
-        const viewer = document.getElementById('streamViewer');
-
-        // If image already exists, just update its src (no DOM flicker)
-        if (existingImg) {
-            existingImg.src = frameUrl;
-        } else {
-            // Initial render: create the image element
-            viewer.innerHTML = `
-                <div class="position-relative">
-                    <img id="liveStreamImg" 
-                         src="${frameUrl}" 
-                         class="img-fluid rounded" 
-                         alt="Live Stream"
-                         style="max-width: 100%; height: auto;">
-                    <div class="position-absolute top-0 end-0 bg-dark text-white px-2 py-1 m-2 rounded">
-                        <i class="fas fa-circle text-success"></i> LIVE
-                    </div>
-                    <div class="position-absolute bottom-0 start-0 bg-dark text-white px-2 py-1 m-2 rounded">
-                        ${new Date().toLocaleTimeString()}
-                    </div>
-                </div>
-            `;
+        retryStream(streamName) {
+            this.startMJPEGStream(streamName);
         }
+        
+        async updateStreamFrame(streamName) {
+            // This method is now used only as fallback or for testing
+            // The main streaming is handled by MJPEG
+            try {
+                const frameUrl = `/api/cctv/stream/${encodeURIComponent(streamName)}/frame?${Date.now()}`;
+                const existingImg = document.querySelector('#streamViewer img');
+                const viewer = document.getElementById('streamViewer');
 
-        // Smoothly update time overlay too
-        const timeOverlay = viewer.querySelector('.position-absolute.bottom-0.start-0');
-        if (timeOverlay) timeOverlay.textContent = new Date().toLocaleTimeString();
+                // If image already exists, just update its src (no DOM flicker)
+                if (existingImg) {
+                    existingImg.src = frameUrl;
+                } else {
+                    // Initial render: create the image element
+                    viewer.innerHTML = `
+                        <div class="position-relative">
+                            <img id="liveStreamImg" 
+                                 src="${frameUrl}" 
+                                 class="img-fluid rounded" 
+                                 alt="Live Stream"
+                                 style="max-width: 100%; height: auto;">
+                            <div class="position-absolute top-0 end-0 bg-dark text-white px-2 py-1 m-2 rounded">
+                                <i class="fas fa-circle text-success"></i> LIVE
+                            </div>
+                            <div class="position-absolute bottom-0 start-0 bg-dark text-white px-2 py-1 m-2 rounded">
+                                ${new Date().toLocaleTimeString()}
+                            </div>
+                        </div>
+                    `;
+                }
 
-        // Update stream info once every cycle
-        this.updateStreamInfo(streamName);
+                // Smoothly update time overlay too
+                const timeOverlay = viewer.querySelector('.position-absolute.bottom-0.start-0');
+                if (timeOverlay) timeOverlay.textContent = new Date().toLocaleTimeString();
 
-    } catch (error) {
-        console.error('Error updating stream frame:', error);
-        const viewer = document.getElementById('streamViewer');
-        viewer.innerHTML = `
-            <div class="text-center p-5 bg-danger text-white rounded">
-                <i class="fas fa-exclamation-triangle fa-2x mb-3"></i>
-                <h5>Connection Error</h5>
-                <p>Failed to connect to stream</p>
-                <button class="btn btn-light btn-sm mt-2" onclick="cctvUI.retryStream('${streamName}')">
-                    <i class="fas fa-redo"></i> Retry
-                </button>
-            </div>
-        `;
-    }
-}
+                // Update stream info once every cycle
+                this.updateStreamInfo(streamName);
+
+            } catch (error) {
+                console.error('Error updating stream frame:', error);
+                const viewer = document.getElementById('streamViewer');
+                viewer.innerHTML = `
+                    <div class="text-center p-5 bg-danger text-white rounded">
+                        <i class="fas fa-exclamation-triangle fa-2x mb-3"></i>
+                        <h5>Connection Error</h5>
+                        <p>Failed to connect to stream</p>
+                        <button class="btn btn-light btn-sm mt-2" onclick="cctvUI.retryStream('${streamName}')">
+                            <i class="fas fa-redo"></i> Retry
+                        </button>
+                    </div>
+                `;
+            }
+        }
 
 
         
@@ -375,6 +471,137 @@ async updateStreamFrame(streamName) {
     let cctvUI;
     document.addEventListener('DOMContentLoaded', () => {
         cctvUI = new CCTVManagerUI();
+        loadLostPersons();
+        setupPersonImagePreview();
     });
+    
+    // Missing Persons Management Functions
+    function showAddPersonModal() {
+        const modal = new bootstrap.Modal(document.getElementById('addPersonModal'));
+        modal.show();
+    }
+    
+    function setupPersonImagePreview() {
+        const fileInput = document.getElementById('personImage');
+        const preview = document.getElementById('personPreview');
+        const previewImg = document.getElementById('personPreviewImg');
+        
+        fileInput.addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    previewImg.src = e.target.result;
+                    preview.style.display = 'block';
+                };
+                reader.readAsDataURL(file);
+            } else {
+                preview.style.display = 'none';
+            }
+        });
+    }
+    
+    async function addLostPerson() {
+        const name = document.getElementById('personName').value.trim();
+        const fileInput = document.getElementById('personImage');
+        const file = fileInput.files[0];
+        
+        if (!name || !file) {
+            alert('Please provide both name and photo');
+            return;
+        }
+        
+        const formData = new FormData();
+        formData.append('name', name);
+        formData.append('age', ''); // Optional field
+        formData.append('last_seen_location', 'Unknown'); // Default location
+        formData.append('last_seen_time', new Date().toISOString().slice(0, 16)); // Current time
+        formData.append('description', 'Added from CCTV Management'); // Default description
+        formData.append('contact_info', ''); // Optional field
+        formData.append('additional_notes', ''); // Optional field
+        formData.append('image', file);
+        
+        try {
+            const response = await fetch('{{ url_for("person.upload_person") }}', {
+                method: 'POST',
+                body: formData
+            });
+            
+            const result = await response.json();
+            
+            if (result.success) {
+                alert('Missing person added successfully!');
+                document.getElementById('addPersonForm').reset();
+                document.getElementById('personPreview').style.display = 'none';
+                bootstrap.Modal.getInstance(document.getElementById('addPersonModal')).hide();
+                loadLostPersons();
+            } else {
+                alert('Error: ' + result.error);
+            }
+        } catch (error) {
+            alert('Failed to add missing person: ' + error.message);
+        }
+    }
+    
+    async function loadLostPersons() {
+        try {
+            const lostPersonsList = document.getElementById('lostPersonsList');
+            const countElement = document.getElementById('lostPersonsCount');
+            
+            // Call the API to get persons
+            const response = await fetch('{{ url_for("api.get_persons") }}');
+            const persons = await response.json();
+            
+            const personCount = Object.keys(persons).length;
+            countElement.textContent = personCount;
+            
+            if (personCount === 0) {
+                lostPersonsList.innerHTML = `
+                    <div class="text-center text-muted">
+                        <p>No persons in database</p>
+                        <small>Persons will appear here when added</small>
+                    </div>
+                `;
+                return;
+            }
+            
+            // Display persons
+            let html = '';
+            Object.entries(persons).forEach(([personId, person]) => {
+                html += `
+                    <div class="card mb-2">
+                        <div class="card-body py-2">
+                            <div class="row align-items-center">
+                                <div class="col-auto">
+                                    <img src="${person.image_path}" 
+                                         alt="${person.name}" 
+                                         class="rounded-circle" 
+                                         style="width: 40px; height: 40px; object-fit: cover;">
+                                </div>
+                                <div class="col">
+                                    <h6 class="mb-0">${person.name}</h6>
+                                    <small class="text-muted">${person.description || 'No description'}</small>
+                                </div>
+                                <div class="col-auto text-end">
+                                    <small class="text-muted">ID: ${personId.substring(0, 8)}</small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+            
+            lostPersonsList.innerHTML = html;
+            
+        } catch (error) {
+            console.error('Error loading lost persons:', error);
+            const lostPersonsList = document.getElementById('lostPersonsList');
+            lostPersonsList.innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="fas fa-exclamation-triangle"></i> Error loading persons: ${error.message}
+                </div>
+            `;
+        }
+    }
 </script>
 {% endblock %}

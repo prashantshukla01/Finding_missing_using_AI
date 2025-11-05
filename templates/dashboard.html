@@ -197,7 +197,7 @@
         try {
             // Load system stats
             const statsResponse = await fetch('/api/stats');
-            const stats = await response.json();
+            const stats = await statsResponse.json();
             
             document.getElementById('totalPersons').textContent = stats.total_persons || 0;
             document.getElementById('activeStreams').textContent = stats.active_streams || 0;

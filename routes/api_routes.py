@@ -52,33 +52,16 @@ def get_persons():
 
 @api_bp.route('/detections/recent')
 def get_recent_detections():
-    """Get recent detections"""
+    """Get recent detections from advanced face matcher"""
     try:
-        # Check if config has the attribute
-        if not hasattr(config, 'DETECTIONS_DB_FILE'):
+        # Use the new face matcher to get recent detections
+        if face_matcher and hasattr(face_matcher, 'get_recent_detections'):
+            recent_detections = face_matcher.get_recent_detections(limit=50)
+            return jsonify(recent_detections)
+        else:
+            # Fallback to empty list if face matcher not available
             return jsonify([])
             
-        # Check if file exists
-        if not os.path.exists(config.DETECTIONS_DB_FILE):
-            return jsonify([])
-            
-        # Load detections from database
-        with open(config.DETECTIONS_DB_FILE, 'r') as f:
-            detections = json.load(f)
-        
-        # Filter recent detections (last 24 hours)
-        recent_detections = []
-        cutoff_time = datetime.now() - timedelta(hours=24)
-        
-        for detection in detections:
-            detection_time = datetime.fromisoformat(detection['timestamp'])
-            if detection_time > cutoff_time:
-                recent_detections.append(detection)
-        
-        return jsonify(recent_detections[-50:])  # Return last 50 detections
-        
-    except FileNotFoundError:
-        return jsonify([])
     except Exception as e:
         logger.error(f"Error getting recent detections: {e}")
         return jsonify([])
