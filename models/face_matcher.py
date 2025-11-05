@@ -80,8 +80,14 @@ class AdvancedFaceMatcher:
         try:
             # InsightFace comparison only
             if 'insightface' in embedding1 and 'insightface' in embedding2:
-                vec1 = np.array(embedding1['insightface'])
-                vec2 = np.array(embedding2['insightface'])
+                vec1 = embedding1['insightface']
+                vec2 = embedding2['insightface']
+            
+                if isinstance(vec1, list):
+                    vec1 = np.array(vec1)
+                if isinstance(vec2, list):
+                    vec2 = np.array(vec2)
+                
                 cosine_sim = np.dot(vec1, vec2) / (np.linalg.norm(vec1) * np.linalg.norm(vec2))
                 
                 # Determine confidence level

@@ -1,8 +1,6 @@
 from flask import Flask, render_template, jsonify
 import logging
 from config import config
-from models import cctv_manager
-from datetime import datetime
 from models.face_matcher import AdvancedFaceMatcher
 from models.cctv_manager import CCTVManager
 
@@ -26,8 +24,8 @@ logger = logging.getLogger(__name__)
 def create_app(config_name='default'):
     """Application factory pattern"""
     app = Flask(__name__)
-    app.config.from_object(config[config_name])
-    config[config_name].init_app(app)
+    app_config = config[config_name]()
+    app_config.init_app(app)
     
     # Initialize components
     try:
@@ -36,23 +34,22 @@ def create_app(config_name='default'):
         face_matcher = AdvancedFaceMatcher()
         
         logger.info("Initializing CCTV Manager...")
-        cctv_manager = CCTVManager(app.config)
+        cctv_manager = CCTVManager(app_config)
         
     except Exception as e:
         logger.error(f"Failed to initialize components: {e}")
         raise
     
-    # Initialize routes with dependencies
-    init_person_routes(app.config, face_matcher)
-    init_cctv_routes(app.config, cctv_manager, face_matcher)
-    init_api_routes(app.config, cctv_manager)
+    # Initialize routes with dependencies - PASS app_config NOT app.config
+    init_person_routes(app_config, face_matcher)
+    init_cctv_routes(app_config, cctv_manager, face_matcher)
+    init_api_routes(app_config, cctv_manager)
     
     # Register blueprints
     app.register_blueprint(person_bp)
     app.register_blueprint(cctv_bp)
     app.register_blueprint(api_bp)
     
-    # Add this to your app.py after CCTV manager initialization
     def add_test_streams():
         """Add public test streams for demonstration"""
         test_streams = [
@@ -75,16 +72,25 @@ def create_app(config_name='default'):
             except Exception as e:
                 logger.warning(f"Failed to add test stream {stream['name']}: {e}")
 
-    # Call this function after CCTV manager is initialized
+    # Add test streams
     add_test_streams()
     
+    # Add a simple demo stream
+    try:
+        success = cctv_manager.add_stream("Demo Stream", "demo", "Test Location")
+        if success:
+            logger.info("Demo stream added successfully")
+        else:
+            logger.error("Failed to add demo stream")
+    except Exception as e:
+        logger.error(f"Error adding demo stream: {e}")
+
     # Root route
     @app.route('/')
     def index():
         return render_template('dashboard.html')
     
     # Error handlers
-        # Error handlers
     @app.errorhandler(404)
     def not_found(error):
         return """
@@ -124,48 +130,10 @@ if __name__ == '__main__':
     print("  - CCTV Management: /cctv/management")
     print("="*50 + "\n")
     
-    
-    
-    # Add webcam stream for testing
-    #cctv_manager.add_webcam_stream("Test Webcam", "Local Computer")
-    # Add this right after the line you commented out:
-    try:
-        # Create a simple test stream manually
-        import numpy as np
-        import cv2
-        from queue import Queue
-        
-        # Create a test image
-        test_image = np.ones((480, 640, 3), dtype=np.uint8) * 255  # White background
-        cv2.putText(test_image, "Face Detection System", (50, 150), 
-                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 2)
-        cv2.putText(test_image, "Demo Mode - Working", (50, 200), 
-                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
-        cv2.putText(test_image, "Add CCTV streams to test", (50, 250), 
-                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
-        
-        # Manually add to CCTV manager
-        cctv_manager.active_streams["Demo Stream"] = {
-            'url': 'demo',
-            'location': 'Demo Location',
-            'active': True,
-            'last_frame': test_image,
-            'last_update': datetime.now(),
-            'added_date': datetime.now().isoformat(),
-            'error_count': 0
-        }
-        cctv_manager.frame_queues["Demo Stream"] = Queue(maxsize=1)
-        cctv_manager.frame_queues["Demo Stream"].put(test_image)
-        
-        logger.info("Added demo stream for testing")
-        
-    except Exception as e:
-        logger.error(f"Failed to add demo stream: {e}")
+    # Run the app
     app.run(
         host='0.0.0.0', 
         port=8001, 
         debug=True,
         threaded=True  # Important for handling multiple CCTV streams
     )
-    
-    

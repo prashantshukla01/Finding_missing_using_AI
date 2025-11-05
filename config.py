@@ -17,7 +17,7 @@ class Config:
     RTSP_TIMEOUT = 10
     FRAME_CAPTURE_INTERVAL = 2  # seconds
     
-    # Database Config - THESE ARE THE MISSING ATTRIBUTES
+    # Database Config
     DATABASE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'database')
     PERSONS_DB_FILE = os.path.join(DATABASE_PATH, 'persons.json')
     CCTV_DB_FILE = os.path.join(DATABASE_PATH, 'cctv_streams.json')

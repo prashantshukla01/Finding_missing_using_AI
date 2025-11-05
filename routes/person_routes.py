@@ -1,23 +1,39 @@
-from flask import Blueprint, render_template, request, jsonify, redirect, url_for
-import os
-import uuid
-from datetime import datetime
-from models.face_matcher import AdvancedFaceMatcher
-from utils.helpers import save_person_to_db, save_uploaded_file, load_persons_from_db
+from flask import Blueprint, render_template, request, jsonify
 import logging
+import os
+from utils.helpers import save_person_to_db, load_persons_from_db, save_uploaded_file, allowed_file
 
 logger = logging.getLogger(__name__)
 
 person_bp = Blueprint('person', __name__, url_prefix='/person')
 
-# MANUAL WORK: You need to initialize this in app.py and pass the config
+# Global variables that will be initialized
 face_matcher = None
-config = None
+app_config = None
 
-def init_person_routes(app_config, face_matcher_instance):
-    global config, face_matcher
-    config = app_config
+def init_person_routes(config, face_matcher_instance):
+    """Initialize the person routes with configuration"""
+    global app_config, face_matcher
+    app_config = config
     face_matcher = face_matcher_instance
+    logger.info("Person routes initialized with config")
+
+@person_bp.route('/test')
+def test_config():
+    """Test if config is working"""
+    if not app_config:
+        return jsonify({'error': 'Config is None'}), 500
+    
+    config_info = {
+        'config_exists': app_config is not None,
+        'has_upload_folder': hasattr(app_config, 'UPLOAD_FOLDER'),
+        'upload_folder': getattr(app_config, 'UPLOAD_FOLDER', 'MISSING'),
+        'has_persons_db': hasattr(app_config, 'PERSONS_DB_FILE'),
+        'persons_db': getattr(app_config, 'PERSONS_DB_FILE', 'MISSING'),
+        'face_matcher_exists': face_matcher is not None
+    }
+    
+    return jsonify(config_info)
 
 @person_bp.route('/upload', methods=['GET'])
 def upload_person_form():
@@ -28,6 +44,20 @@ def upload_person_form():
 def upload_person():
     """Handle person details upload"""
     try:
+        # Check if config and face_matcher are initialized
+        if not app_config:
+            logger.error("Config not initialized in person routes")
+            return jsonify({'success': False, 'error': 'System configuration error - Config not set'}), 500
+        
+        if not face_matcher:
+            logger.error("Face matcher not initialized in person routes")
+            return jsonify({'success': False, 'error': 'System configuration error - Face recognition not available'}), 500
+
+        # Check if config has required attributes
+        if not hasattr(app_config, 'UPLOAD_FOLDER'):
+            logger.error("UPLOAD_FOLDER missing from config")
+            return jsonify({'success': False, 'error': 'System configuration error - Upload folder not configured'}), 500
+
         # Extract form data
         person_data = {
             'name': request.form.get('name', '').strip(),
@@ -50,10 +80,14 @@ def upload_person():
         if image_file.filename == '':
             return jsonify({'success': False, 'error': 'No image selected'}), 400
         
+        # Validate file type
+        if not allowed_file(image_file.filename):
+            return jsonify({'success': False, 'error': 'Invalid file type. Use JPG, PNG, or JPEG'}), 400
+        
         # Save uploaded image
         image_path, error = save_uploaded_file(
             image_file, 
-            config.UPLOAD_FOLDER, 
+            app_config.UPLOAD_FOLDER, 
             'persons'
         )
         
@@ -86,7 +120,10 @@ def upload_person():
         person_data['embedding'] = embedding
         
         # Save to database
-        person_id = save_person_to_db(person_data, config.PERSONS_DB_FILE)
+        if not hasattr(app_config, 'PERSONS_DB_FILE'):
+            return jsonify({'success': False, 'error': 'Database configuration error'}), 500
+            
+        person_id = save_person_to_db(person_data, app_config.PERSONS_DB_FILE)
         
         if person_id:
             logger.info(f"Successfully registered person: {person_data['name']} with ID: {person_id}")
@@ -106,11 +143,9 @@ def upload_person():
 def list_persons():
     """Display list of all registered persons"""
     try:
-        # Check if config has the required attribute
-        if not hasattr(config, 'PERSONS_DB_FILE'):
-            return render_template('person_list.html', persons={})
-        
-        persons = load_persons_from_db(config.PERSONS_DB_FILE)
+        persons = {}
+        if app_config and hasattr(app_config, 'PERSONS_DB_FILE'):
+            persons = load_persons_from_db(app_config.PERSONS_DB_FILE)
         return render_template('person_list.html', persons=persons)
     except Exception as e:
         logger.error(f"Error loading persons list: {e}")
