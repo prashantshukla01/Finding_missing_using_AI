@@ -27,6 +27,11 @@ def cctv_management():
     """Display CCTV management page"""
     return render_template('cctv_management.html')
 
+@cctv_bp.route('/history')
+def history_map_view():
+    """Display historical detections and map view"""
+    return render_template('historical_map.html')
+
 @cctv_bp.route('/dashboard')
 def dashboard():
     """Display main dashboard"""
@@ -63,12 +68,15 @@ def add_cctv_stream():
         stream_name = data['name'].strip()
         rtsp_url = data['url'].strip()
         location = data['location'].strip()
+        lat = data.get('lat')
+        lng = data.get('lng')
+
         
         if not stream_name or not rtsp_url or not location:
             return jsonify({'success': False, 'error': 'All fields are required'}), 400
         
         # Add stream to CCTV manager
-        success = cctv_manager.add_stream(stream_name, rtsp_url, location)
+        success = cctv_manager.add_stream(stream_name, rtsp_url, location, lat, lng)
         
         if success:
             return jsonify({
@@ -142,6 +150,24 @@ def retry_stream(stream_name):
             
     except Exception as e:
         logger.error(f"Error retrying stream {stream_name}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@cctv_bp.route('/toggle/<stream_name>', methods=['POST'])
+def toggle_stream_status(stream_name):
+    """Toggle a stream on/off"""
+    try:
+        data = request.get_json()
+        active = data.get('active', True)
+        logger.warning(f"🔌 TOGGLE REQUEST: {stream_name} -> {active}")
+        
+        if cctv_manager.set_stream_active(stream_name, active):
+            status = "enabled" if active else "disabled"
+            return jsonify({'success': True, 'message': f'Stream {stream_name} {status}'})
+        else:
+            return jsonify({'success': False, 'error': 'Stream not found'}), 404
+            
+    except Exception as e:
+        logger.error(f"Error toggling stream {stream_name}: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 def process_frame_for_detection(stream_name):

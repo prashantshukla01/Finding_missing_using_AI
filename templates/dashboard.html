@@ -6,7 +6,7 @@
 <div class="row">
     <div class="col-12">
         <h2 class="mb-4"><i class="fas fa-tachometer-alt"></i> System Dashboard</h2>
-        
+
         <!-- Statistics Cards -->
         <div class="row mb-4">
             <div class="col-xl-3 col-md-6">
@@ -30,7 +30,7 @@
                     </div>
                 </div>
             </div>
-            
+
             <div class="col-xl-3 col-md-6">
                 <div class="card bg-success text-white mb-4 stat-card">
                     <div class="card-body">
@@ -52,7 +52,7 @@
                     </div>
                 </div>
             </div>
-            
+
             <div class="col-xl-3 col-md-6">
                 <div class="card bg-warning text-white mb-4 stat-card">
                     <div class="card-body">
@@ -74,7 +74,7 @@
                     </div>
                 </div>
             </div>
-            
+
             <div class="col-xl-3 col-md-6">
                 <div class="card bg-info text-white mb-4 stat-card">
                     <div class="card-body">
@@ -108,13 +108,15 @@
                     <div class="card-body">
                         <div class="row g-3">
                             <div class="col-md-6">
-                                <a href="{{ url_for('person.upload_person_form') }}" class="btn btn-primary w-100 h-100 py-3">
+                                <a href="{{ url_for('person.upload_person_form') }}"
+                                    class="btn btn-primary w-100 h-100 py-3">
                                     <i class="fas fa-user-plus fa-2x mb-2"></i><br>
                                     Add Missing Person
                                 </a>
                             </div>
                             <div class="col-md-6">
-                                <a href="{{ url_for('cctv.cctv_management') }}" class="btn btn-success w-100 h-100 py-3">
+                                <a href="{{ url_for('cctv.cctv_management') }}"
+                                    class="btn btn-success w-100 h-100 py-3">
                                     <i class="fas fa-video fa-2x mb-2"></i><br>
                                     Manage CCTV Streams
                                 </a>
@@ -198,30 +200,41 @@
             // Load system stats
             const statsResponse = await fetch('/api/stats');
             const stats = await statsResponse.json();
-            
+
             document.getElementById('totalPersons').textContent = stats.total_persons || 0;
             document.getElementById('activeStreams').textContent = stats.active_streams || 0;
             document.getElementById('detectionsToday').textContent = stats.detections_today || 0;
             document.getElementById('systemStatus').textContent = stats.system_status || 'Unknown';
-            
+
+            // Update System Info Panel
+            const systemInfoHtml = `
+                <ul class="list-unstyled mb-0">
+                    <li class="mb-2"><i class="fas fa-server w-25"></i> Status: <strong>${stats.system_status}</strong></li>
+                    <li class="mb-2"><i class="fas fa-id-card w-25"></i> Face Matcher: <strong>${stats.face_recognition}</strong></li>
+                    <li class="mb-2"><i class="fas fa-video w-25"></i> CCTV Monitoring: <strong>${stats.cctv_monitoring}</strong></li>
+                    <li class="mb-0"><i class="fas fa-clock w-25"></i> Server Time: ${new Date().toLocaleTimeString()}</li>
+                </ul>
+            `;
+            document.getElementById('systemInfo').innerHTML = systemInfoHtml;
+
             // Load recent detections
             const detectionsResponse = await fetch('/api/detections/recent');
             const detections = await detectionsResponse.json();
             displayRecentDetections(detections);
-            
+
             // Load active streams
             const streamsResponse = await fetch('{{ url_for("cctv.get_streams") }}');
             const streams = await streamsResponse.json();
             displayActiveStreams(streams);
-            
+
         } catch (error) {
             console.error('Error loading dashboard data:', error);
         }
     }
-    
+
     function displayRecentDetections(detections) {
         const container = document.getElementById('recentDetections');
-        
+
         if (detections.length === 0) {
             container.innerHTML = `
                 <div class="text-center text-muted py-4">
@@ -231,14 +244,14 @@
             `;
             return;
         }
-        
+
         let html = '';
         const recent = detections.slice(-8).reverse(); // Show last 8 detections
-        
+
         recent.forEach(detection => {
             const time = new Date(detection.timestamp).toLocaleTimeString();
             const confidence = (detection.confidence * 100).toFixed(1);
-            
+
             html += `
                 <div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-2">
                     <div>
@@ -252,14 +265,14 @@
                 </div>
             `;
         });
-        
+
         container.innerHTML = html;
     }
-    
+
     function displayActiveStreams(streams) {
         const container = document.getElementById('activeStreamsList');
         const activeStreams = Object.entries(streams).filter(([name, info]) => info.active);
-        
+
         if (activeStreams.length === 0) {
             container.innerHTML = `
                 <div class="text-center text-muted py-4">
@@ -269,7 +282,7 @@
             `;
             return;
         }
-        
+
         let html = '';
         activeStreams.forEach(([name, info]) => {
             html += `
@@ -285,10 +298,10 @@
                 </div>
             `;
         });
-        
+
         container.innerHTML = html;
     }
-    
+
     function quickSearch() {
         const input = document.createElement('input');
         input.type = 'file';
@@ -302,7 +315,7 @@
         };
         input.click();
     }
-    
+
     // Load dashboard data on page load and refresh every 30 seconds
     document.addEventListener('DOMContentLoaded', () => {
         loadDashboardData();

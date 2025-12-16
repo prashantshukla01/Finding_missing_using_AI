@@ -1,0 +1,253 @@
+{% extends "base.html" %}
+
+{% block title %}Historical & Map View - Missing Person Detection System{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+<style>
+    #map {
+        height: 600px;
+        width: 100%;
+        border-radius: 0.5rem;
+    }
+
+    .history-item {
+        cursor: pointer;
+        transition: background-color 0.2s;
+    }
+
+    .history-item:hover {
+        background-color: #f8f9fa;
+    }
+
+    .history-item.active {
+        background-color: #e9ecef;
+        border-left: 4px solid #0d6efd;
+    }
+
+    .history-list {
+        height: 600px;
+        overflow-y: auto;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <h2><i class="fas fa-history"></i> Historical & Map View</h2>
+        <p class="text-muted">View past detections and camera locations on the map.</p>
+    </div>
+</div>
+
+<div class="row g-3">
+    <!-- Filters and History List -->
+    <div class="col-lg-4">
+        <div class="card h-100">
+            <div class="card-header">
+                <h5 class="card-title mb-0"><i class="fas fa-filter"></i> Filters & History</h5>
+            </div>
+            <div class="card-body d-flex flex-column">
+                <form id="filterForm" class="mb-3">
+                    <div class="mb-2">
+                        <label for="personName" class="form-label">Person Name</label>
+                        <input type="text" class="form-control" id="personName" placeholder="Search by name...">
+                    </div>
+                    <div class="row g-2 mb-2">
+                        <div class="col-6">
+                            <label for="startDate" class="form-label">Start Date</label>
+                            <input type="date" class="form-control" id="startDate">
+                        </div>
+                        <div class="col-6">
+                            <label for="endDate" class="form-label">End Date</label>
+                            <input type="date" class="form-control" id="endDate">
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100">Apply Filters</button>
+                    <button type="button" id="resetFilters" class="btn btn-outline-secondary w-100 mt-2">Reset</button>
+                </form>
+
+                <hr>
+
+                <div class="flex-grow-1 history-list" id="historyList">
+                    <div class="text-center py-4">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <p class="mt-2 text-muted">Loading history...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Map View -->
+    <div class="col-lg-8">
+        <div class="card h-100">
+            <div class="card-header">
+                <h5 class="card-title mb-0"><i class="fas fa-map-marked-alt"></i> Camera Locations</h5>
+            </div>
+            <div class="card-body p-0">
+                <div id="map"></div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script>
+    let map;
+    let markers = {};
+    let detections = [];
+    let streamLocations = {};
+
+    document.addEventListener('DOMContentLoaded', () => {
+        initMap();
+        loadData();
+    });
+
+    document.getElementById('filterForm').addEventListener('submit', (e) => {
+        e.preventDefault();
+        loadHistory();
+    });
+
+    document.getElementById('resetFilters').addEventListener('click', () => {
+        document.getElementById('personName').value = '';
+        document.getElementById('startDate').value = '';
+        document.getElementById('endDate').value = '';
+        loadHistory();
+    });
+
+    function initMap() {
+        // Default center (can be updated based on first camera)
+        map = L.map('map').setView([28.6139, 77.2090], 13); // New Delhi as default
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
+    }
+
+    async function loadData() {
+        // Load streams to get locations
+        try {
+            const streamsResponse = await fetch('/cctv/streams');
+            const streams = await streamsResponse.json();
+
+            // Clear existing markers
+            Object.values(markers).forEach(marker => map.removeLayer(marker));
+            markers = {};
+            streamLocations = {};
+
+            const bounds = [];
+
+            for (const [name, info] of Object.entries(streams)) {
+                if (info.lat && info.lng) {
+                    const lat = parseFloat(info.lat);
+                    const lng = parseFloat(info.lng);
+
+                    if (!isNaN(lat) && !isNaN(lng)) {
+                        const marker = L.marker([lat, lng])
+                            .bindPopup(`<b>${name}</b><br>${info.location}`)
+                            .addTo(map);
+
+                        markers[name] = marker;
+                        streamLocations[name] = { lat, lng };
+                        bounds.push([lat, lng]);
+                    }
+                }
+            }
+
+            if (bounds.length > 0) {
+                map.fitBounds(bounds);
+            }
+        } catch (error) {
+            console.error('Error loading streams:', error);
+        }
+
+        // Load history
+        loadHistory();
+    }
+
+    async function loadHistory() {
+        const personName = document.getElementById('personName').value;
+        const startDate = document.getElementById('startDate').value;
+        const endDate = document.getElementById('endDate').value;
+
+        const params = new URLSearchParams();
+        if (personName) params.append('person_name', personName);
+        if (startDate) params.append('start_date', startDate);
+        if (endDate) params.append('end_date', endDate + 'T23:59:59'); // End of day
+
+        try {
+            const response = await fetch(`/api/detections/history?${params.toString()}`);
+            detections = await response.json();
+
+            renderHistoryList(detections);
+        } catch (error) {
+            console.error('Error loading history:', error);
+            document.getElementById('historyList').innerHTML = '<p class="text-danger text-center p-3">Error loading history</p>';
+        }
+    }
+
+    function renderHistoryList(data) {
+        const container = document.getElementById('historyList');
+
+        if (data.length === 0) {
+            container.innerHTML = `
+                <div class="text-center text-muted py-4">
+                    <i class="fas fa-search-minus fa-2x mb-2"></i>
+                    <p>No detections found</p>
+                </div>
+            `;
+            return;
+        }
+
+        let html = '';
+        data.forEach((detection, index) => {
+            const date = new Date(detection.timestamp);
+            const timeStr = date.toLocaleString();
+            const similarity = (detection.similarity * 100).toFixed(1); // Use similarity from API, mapped to confidence if needed
+
+            html += `
+                <div class="p-3 border-bottom history-item" onclick="focusOnDetection(${index})">
+                    <div class="d-flex justify-content-between">
+                        <strong>${detection.person_name}</strong>
+                        <small class="text-muted">${timeStr}</small>
+                    </div>
+                    <div class="small text-muted">
+                        <i class="fas fa-video"></i> ${detection.stream_name}
+                        <span class="ms-2 badge bg-primary">${similarity}% Match</span>
+                    </div>
+                </div>
+            `;
+        });
+
+        container.innerHTML = html;
+    }
+
+    window.focusOnDetection = function (index) {
+        const detection = detections[index];
+        const streamName = detection.stream_name;
+
+        // Highlight in list
+        document.querySelectorAll('.history-item').forEach((el, i) => {
+            if (i === index) el.classList.add('active');
+            else el.classList.remove('active');
+        });
+
+        // Focus on map if location exists
+        if (markers[streamName]) {
+            markers[streamName].openPopup();
+            map.setView(markers[streamName].getLatLng(), 16);
+        } else {
+            // Toast or alert if no location
+            // Ideally we shouldn't alert, maybe just log
+            console.log("No location data for this stream");
+        }
+    };
+</script>
+{% endblock %}

@@ -79,6 +79,43 @@ def get_recent_detections():
         logger.error(f"Error getting recent detections: {e}")
         return jsonify([])
 
+@api_bp.route('/detections/history')
+def get_detection_history():
+    """Get historical detections with filters"""
+    try:
+        if not config or not hasattr(config, 'DETECTIONS_DB_FILE') or not os.path.exists(config.DETECTIONS_DB_FILE):
+             return jsonify([])
+
+        with open(config.DETECTIONS_DB_FILE, 'r') as f:
+            detections = json.load(f)
+
+        # Filters
+        start_date = request.args.get('start_date')
+        end_date = request.args.get('end_date')
+        person_name = request.args.get('person_name')
+        stream_name = request.args.get('stream_name')
+
+        filtered = detections
+
+        if start_date:
+            filtered = [d for d in filtered if d['timestamp'] >= start_date]
+        if end_date:
+            filtered = [d for d in filtered if d['timestamp'] <= end_date]
+        if person_name:
+            filtered = [d for d in filtered if person_name.lower() in d.get('person_name', '').lower()]
+        if stream_name:
+            filtered = [d for d in filtered if stream_name == d.get('stream_name')]
+
+        # Sort by timestamp descending
+        filtered.sort(key=lambda x: x['timestamp'], reverse=True)
+        
+        # Limit results to 1000 to avoid huge payloads
+        return jsonify(filtered[:1000])
+
+    except Exception as e:
+        logger.error(f"Error getting detection history: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @api_bp.route('/search', methods=['POST'])
 def search_person():
     """Search for a person across all CCTV streams"""
@@ -193,13 +230,22 @@ def get_system_stats():
             except:
                 detections_today = 0
         
+        # Determine system status
+        status = 'Operational'
+        if not cctv_manager or not cctv_manager.running:
+            status = 'Stopped'
+        elif not face_matcher:
+             status = 'Degraded (No Face Matcher)'
+        elif active_streams == 0 and total_streams > 0:
+             status = 'Idle (No Active Streams)'
+        
         return jsonify({
             'total_persons': total_persons,
             'total_streams': total_streams,
             'active_streams': active_streams,
             'detections_today': detections_today,
-            'system_status': 'operational',
-            'face_recognition': 'active',
+            'system_status': status,
+            'face_recognition': 'active' if face_matcher else 'inactive',
             'cctv_monitoring': 'active' if cctv_manager else 'inactive'
         })
         

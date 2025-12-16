@@ -7,9 +7,11 @@
     <div class="col-12">
         <div class="d-flex justify-content-between align-items-center mb-4">
             <h2><i class="fas fa-video"></i> CCTV Management</h2>
-            <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addStreamModal">
-                <i class="fas fa-plus"></i> Add New Stream
-            </button>
+            <div class="col d-flex justify-content-end gap-2">
+                <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addStreamModal">
+                    <i class="fas fa-plus"></i> Add New Stream
+                </button>
+            </div>
         </div>
 
         <div class="row">
@@ -138,6 +140,19 @@
                         <input type="text" class="form-control" id="streamLocation" required
                             placeholder="e.g., Main Entrance, Parking Lot">
                     </div>
+
+                    <div class="row">
+                        <div class="col-6 mb-3">
+                            <label for="streamLat" class="form-label">Latitude</label>
+                            <input type="number" step="any" class="form-control" id="streamLat"
+                                placeholder="e.g., 28.6139">
+                        </div>
+                        <div class="col-6 mb-3">
+                            <label for="streamLng" class="form-label">Longitude</label>
+                            <input type="number" step="any" class="form-control" id="streamLng"
+                                placeholder="e.g., 77.2090">
+                        </div>
+                    </div>
                 </form>
             </div>
             <div class="modal-footer">
@@ -250,20 +265,23 @@
                 }
 
                 html += `
-                    <div class="stream-item card mb-2 ${isCurrent ? 'border-primary' : ''}" 
-                         onclick="cctvUI.selectStream('${name}')" style="cursor: pointer;">
+                    <div class="stream-item card mb-2 ${isCurrent ? 'border-primary' : ''}" style="cursor: pointer;">
                         <div class="card-body py-2">
                             <div class="d-flex justify-content-between align-items-start">
-                                <div>
+                                <div onclick="cctvUI.selectStream('${name}')">
                                     <h6 class="mb-1">${name}</h6>
                                     <small class="text-muted">${info.location}</small>
                                 </div>
                                 <div class="text-end">
+                                    <div class="form-check form-switch d-inline-block">
+                                        <input class="form-check-input" type="checkbox" id="toggle-${name}" 
+                                               ${info.active ? 'checked' : ''} 
+                                               onchange="cctvUI.toggleStream('${name}', this.checked)">
+                                    </div>
+                                    <br>
                                     <span class="badge bg-${statusClass}">
                                         ${statusText}
                                     </span>
-                                    <br>
-                                    <small class="text-muted">${lastUpdate}</small>
                                 </div>
                             </div>
                         </div>
@@ -446,13 +464,115 @@
 
             detectionsList.innerHTML = html;
         }
+
+        async stopWebcam() {
+            const btn = document.querySelector('button[onclick="cctvUI.stopWebcam()"]');
+            const originalText = btn ? btn.innerHTML : 'Stop Webcam';
+            if (btn) {
+                btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Stopping...';
+                btn.disabled = true;
+            }
+
+            try {
+                // Find the stream named "Live Webcam"
+                const toggleElement = document.getElementById('toggle-Live Webcam');
+                // Force UI off immediately
+                if (toggleElement) toggleElement.checked = false;
+
+                // Call API
+                const response = await fetch('/cctv/toggle/Live%20Webcam', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ active: false })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    if (this.currentStream === 'Live Webcam') {
+                        document.getElementById('streamViewer').innerHTML = `
+                            <div class="text-center p-5">
+                                <i class="fas fa-video-slash fa-3x mb-3 text-muted"></i>
+                                <h5>No Stream Selected</h5>
+                                <p class="text-muted">Webcam stopped successfully</p>
+                            </div>
+                        `;
+                        this.currentStream = null;
+                        if (this.streamInterval) clearInterval(this.streamInterval);
+                    }
+                    this.loadStreams();
+                    // Optional: Brief success indicator on button
+                    if (btn) btn.innerHTML = '<i class="fas fa-check"></i> Stopped';
+                } else {
+                    alert('Error stopping webcam: ' + result.error);
+                }
+            } catch (e) {
+                console.error(e);
+                alert("Failed to stop webcam: " + e.message);
+            } finally {
+                // Restore button after delay
+                setTimeout(() => {
+                    if (btn) {
+                        btn.innerHTML = originalText;
+                        btn.disabled = false;
+                    }
+                }, 2000);
+            }
+        }
+
+        async toggleStream(streamName, active) {
+            try {
+                // Prevent bubbling if clicking switch also triggers selectStream
+                if (window.event) window.event.stopPropagation();
+
+                const response = await fetch(`/cctv/toggle/${encodeURIComponent(streamName)}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ active })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    if (active) {
+                        // If turning ON, auto-select it
+                        this.selectStream(streamName);
+                    } else {
+                        // If turning OFF
+                        if (this.currentStream === streamName) {
+                            if (this.streamInterval) clearInterval(this.streamInterval);
+                            this.currentStream = null;
+
+                            document.getElementById('streamViewer').innerHTML = `
+                                <div class="text-center p-5">
+                                    <i class="fas fa-video-slash fa-3x mb-3 text-muted"></i>
+                                    <h5>No Stream Selected</h5>
+                                    <p class="text-muted">Select a stream from the list to view live footage</p>
+                                </div>
+                            `;
+                        }
+                        this.loadStreams(); // Refresh list to show disabled status
+                    }
+                } else {
+                    alert('Error toggling stream: ' + result.error);
+                    document.getElementById(`toggle-${streamName}`).checked = !active;
+                }
+            } catch (error) {
+                console.error('Error toggling stream:', error);
+                alert('Failed to toggle stream');
+                document.getElementById(`toggle-${streamName}`).checked = !active;
+            }
+        }
     }
+
 
     // Global function to add stream
     async function addStream() {
         const name = document.getElementById('streamName').value.trim();
         const url = document.getElementById('rtspUrl').value.trim();
         const location = document.getElementById('streamLocation').value.trim();
+        const lat = document.getElementById('streamLat').value.trim();
+        const lng = document.getElementById('streamLng').value.trim();
 
         if (!name || !url || !location) {
             alert('Please fill all required fields');
@@ -463,7 +583,7 @@
             const response = await fetch('{{ url_for("cctv.add_cctv_stream") }}', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name, url, location })
+                body: JSON.stringify({ name, url, location, lat, lng })
             });
 
             const result = await response.json();
@@ -617,5 +737,11 @@
             `;
         }
     }
+
+    // Initialize
+    document.addEventListener('DOMContentLoaded', () => {
+        window.cctvUI = new CCTVManagerUI();
+        loadLostPersons();
+    });
 </script>
 {% endblock %}

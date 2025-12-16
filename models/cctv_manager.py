@@ -57,8 +57,17 @@ class StreamReader:
             
     def release(self):
         self.running = False
-        self.thread.join(timeout=1)
-        self.cap.release()
+        # Try to join thread
+        if self.thread.is_alive():
+            self.thread.join(timeout=1.0)
+        
+        if self.cap:
+            self.cap.release()
+            self.cap = None
+        
+        # Force garbage collection to ensure hardware release on some platforms
+        import gc
+        gc.collect()
         
     def isOpened(self):
         return self.cap.isOpened()
@@ -79,6 +88,7 @@ class CCTVManager:
         self.stream_threads = {}
         self.running = True  # Global running flag
         self.latest_detections = {} # Cache for background detections
+        self.last_detection_times = {} # Check for duplicate detections: {(stream_name, person_name): timestamp}
         
         # Lost persons database
         self.lost_face_encodings = []
@@ -227,14 +237,17 @@ class CCTVManager:
                 streams_data = json.loads(content)
                     
             for stream_name, stream_info in streams_data.items():
+                # Force all streams to start as INACTIVE/OFFLINE by default as requested
                 self.add_stream(
                     stream_name,
                     stream_info['url'],
                     stream_info['location'],
-                    start_monitoring=True
+                    lat=stream_info.get('lat'),
+                    lng=stream_info.get('lng'),
+                    start_monitoring=False # User requested all toggles off by default
                 )
                 
-            logger.info(f"Loaded {len(streams_data)} streams from database")
+            logger.info(f"Loaded {len(streams_data)} streams from database (Started as INACTIVE)")
         except Exception as e:
             logger.error(f"Error loading CCTV database: {e}")
     
@@ -250,6 +263,9 @@ class CCTVManager:
                     streams_data[stream_name] = {
                         'url': stream_info['url'],
                         'location': stream_info['location'],
+                        'lat': stream_info.get('lat'),
+                        'lng': stream_info.get('lng'),
+                        'active': stream_info.get('active', True),
                         'added_date': stream_info.get('added_date', datetime.now().isoformat())
                     }
             
@@ -259,7 +275,7 @@ class CCTVManager:
         except Exception as e:
             logger.error(f"Error saving CCTV database: {e}")
     
-    def add_stream(self, stream_name, rtsp_url, location, start_monitoring=True):
+    def add_stream(self, stream_name, rtsp_url, location, lat=None, lng=None, start_monitoring=True):
         """Add a new RTSP stream"""
         logger.info(f"Adding stream: {stream_name}")
         
@@ -278,7 +294,10 @@ class CCTVManager:
             self.active_streams[stream_name] = {
                 'url': rtsp_url,
                 'location': location,
-                'active': True,
+                'lat': lat,
+                'lng': lng,
+                'active': start_monitoring,
+            'status': 'disabled' if not start_monitoring else 'connecting',
                 'last_update': datetime.now(),
                 'added_date': datetime.now().isoformat(),
                 'error_count': 0
@@ -290,42 +309,131 @@ class CCTVManager:
         self.save_streams_to_db()
         return True
     
-    def add_webcam_stream(self, stream_name="Live Webcam", location="Your Location"):
+    def add_webcam_stream(self, stream_name="Live Webcam", location="Your Location", active=False):
         """Add webcam as a stream for testing"""
         # Cleanup existing stream if present
         self.stop_stream(stream_name)
         
         # Test if webcam is available
         try:
-            cap = cv2.VideoCapture(0)
-            if cap.isOpened():
-                ret, _ = cap.read()
-                cap.release()
-                if ret:
-                    return self.add_stream(stream_name, "0", location)
+            if active:
+                cap = cv2.VideoCapture(0)
+                if cap.isOpened():
+                    ret, _ = cap.read()
+                    cap.release()
+                    if ret:
+                        return self.add_stream(stream_name, "0", location, start_monitoring=True)
+            else:
+                # Add as disabled immediately
+                with self.lock:
+                    self.blocked_streams.add(stream_name)
+                    logger.info(f"Adding webcam {stream_name} as DISABLED (Blocked by default)")
+                return self.add_stream(stream_name, "0", location, start_monitoring=False)
             
-            logger.error("Webcam not accessible")
+            logger.error("Webcam not accessible or active=False check skipped")
             return False
         except Exception as e:
             logger.error(f"Error testing webcam: {e}")
             return False
 
-    def stop_stream(self, stream_name):
+    def __init__(self, config=None):
+        self.config = config
+        self.active_streams = {}
+        self.stream_threads = {}
+        self.stream_readers = {} # New: Track readers for forced cleanup
+        self.blocked_streams = set() # New: Explicit block list (Kill Switch)
+        self.latest_frames = {}
+        self.latest_detections = {}
+        self.lock = threading.Lock()
+        self.running = True
+        
+        # Load configuration
+        if self.config:
+            self.lost_faces_dir = os.path.join(self.config.UPLOAD_FOLDER, 'persons')
+            os.makedirs(self.lost_faces_dir, exist_ok=True)
+        else:
+            # Fallback for direct instantiation without config (should not happen in app)
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            self.lost_faces_dir = os.path.join(base_dir, '..', 'data', 'uploads', 'persons')
+            
+        self.load_streams_from_db()
+
+        # Load lost persons for matching
+        self.lost_face_encodings = []
+        self.lost_face_names = []
+        self.load_lost_persons_database() # Assuming this is the correct method name
+        
+        # Detection throttling
+        self.last_detection_times = {} # Key: (stream_name, person_name), Value: timestamp
+
+    def stop_stream(self, stream_name, remove_from_config=True):
         """Stop a specific stream monitoring"""
+        logger.warning(f"🛑 STOPPING STREAM REQUEST: {stream_name}")
+        
+        # 0. BLOCK IT immediately if this is a toggle-off (not a delete)
+        if not remove_from_config:
+            with self.lock:
+                self.blocked_streams.add(stream_name)
+                logger.warning(f"🚫 BLOCKED stream {stream_name} (Kill Switch Active)")
+        
+        # 1. First, mark as inactive to signal thread loop to stop
         with self.lock:
             if stream_name in self.active_streams:
                 self.active_streams[stream_name]['active'] = False
+                logger.warning(f"Set active=False for {stream_name}")
+            else:
+                logger.warning(f"{stream_name} not found in active_streams during stop")
         
-        # Wait for thread to finish
+        # 2. THEN Force release the reader to interrupt any blocking I/O
+        if stream_name in self.stream_readers:
+            try:
+                reader = self.stream_readers[stream_name]
+                logger.warning(f"FORCE RELEASING reader for {stream_name}")
+                reader.release()
+                del self.stream_readers[stream_name]
+            except Exception as e:
+                logger.error(f"Error force releasing reader: {e}")
+        
+        # 3. Wait for thread to finish
         if stream_name in self.stream_threads:
             thread = self.stream_threads[stream_name]
+            logger.warning(f"Waiting for thread {stream_name} to join...")
             if thread.is_alive():
-                thread.join(timeout=2.0)
+                thread.join(timeout=3.0)
+                if thread.is_alive():
+                    logger.error(f"❌ Thread {stream_name} DID NOT DIE after 3s join")
+                else:
+                    logger.warning(f"✅ Thread {stream_name} joined successfully")
             del self.stream_threads[stream_name]
             
         with self.lock:
             if stream_name in self.active_streams:
-                del self.active_streams[stream_name]
+                if remove_from_config:
+                    del self.active_streams[stream_name]
+                else:
+                    self.active_streams[stream_name]['status'] = 'disabled'
+                    
+        self.save_streams_to_db()
+
+    def set_stream_active(self, stream_name, active):
+        """Enable or disable a stream"""
+        if active:
+            # UNBLOCK if explicitly enabled
+            with self.lock:
+                if stream_name in self.blocked_streams:
+                    self.blocked_streams.remove(stream_name)
+                    logger.warning(f"✅ UNBLOCKED stream {stream_name} (User explicitly enabled)")
+
+            if stream_name not in self.active_streams:
+                return False
+                
+            with self.lock:
+                self.active_streams[stream_name]['active'] = True
+                
+            return self.start_stream_monitoring(stream_name)
+        else:
+            self.stop_stream(stream_name, remove_from_config=False)
+            return True
 
     def test_rtsp_connection(self, rtsp_url):
         """Test if RTSP stream is accessible"""
@@ -341,6 +449,12 @@ class CCTVManager:
     
     def start_stream_monitoring(self, stream_name):
         """Start monitoring a specific stream"""
+        # CHECK BLOCK LIST
+        with self.lock:
+            if stream_name in self.blocked_streams:
+                logger.warning(f"⛔ Cannot start stream {stream_name}: BLOCKED (Kill Switch Active)")
+                return False
+
         if stream_name in self.stream_threads and self.stream_threads[stream_name].is_alive():
              return True
         
@@ -371,129 +485,150 @@ class CCTVManager:
             stream_info['status'] = 'connecting'
             
         frame_count = 0 
-        while self.running and stream_name in self.active_streams and self.active_streams[stream_name]['active']:
-            try:
-                # Initialize or Reconnect
-                if reader is None or not reader.isOpened():
-                    with self.lock:
-                        stream_info['status'] = 'connecting'
-                    
-                    # Connection Logic (Transport Options)
-                    # Force TCP for RTSP (better stability), but NOT for RTMP or port 1935 (non-standard)
-                    if stream_info['url'].lower().startswith('rtsp://') and ':1935' not in stream_info['url']:
-                        os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
-                    elif stream_info['url'].lower().startswith('rtmp://') or ':1935' in stream_info['url']:
-                        if "OPENCV_FFMPEG_CAPTURE_OPTIONS" in os.environ:
-                            del os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"]
-
-                    # Start Reader Thread
-                    if reader: reader.release()
-                    reader = StreamReader(stream_info['url'])
-                    
-                    time.sleep(1) # Give it a moment to connect
-                    
-                    if not reader.isOpened():
-                         # Auto-Healing Logic
-                         logger.warning(f"Stream {stream_name} failed to open. Attempting auto-port scan...")
-                         new_url = self._scan_and_fix_url(stream_info['url'])
-                         if new_url and new_url != stream_info['url']:
-                               logger.info(f"Auto-Healing: Found open port! Switching {stream_info['url']} -> {new_url}")
-                               with self.lock:
-                                   stream_info['url'] = new_url 
-                               reader = StreamReader(new_url)
-                               self.save_streams_to_db()
-
-                    if not reader.isOpened():
-                           logger.warning(f"Failed to open stream {stream_name}. Retrying in {reconnect_interval}s...")
-                           with self.lock:
-                               stream_info['status'] = 'error'
-                           time.sleep(reconnect_interval)
-                           continue
-                    else:
-                        logger.info(f"Successfully connected to {stream_name}")
-                        with self.lock:
-                            stream_info['status'] = 'online'
-
-                # Read Latest Frame (Non-blocking usually, blocks if empty but we have a dedicated thread feeding it)
-                frame = reader.read()
-                
-                if frame is None:
-                    # No frame available yet or connection lost
-                    # Check if reader is actually dead
-                    if not reader.running or reader.status == 'error':
-                         logger.warning(f"Reader failed for {stream_name}. Reconnecting...")
-                         reader.release()
-                         reader = None
-                         continue
-                    else:
-                        # Just waiting for first frame
-                        time.sleep(0.1)
-                        continue
-
-                # Resize if needed (standardize size for processing)
-                if frame.shape[1] != 640 or frame.shape[0] != 480:
-                    frame = cv2.resize(frame, (640, 480))
-                
-                # Frame Skipping for Detection (Inference every 5 frames)
-                frame_count += 1
-                if frame_count % 5 == 0:
-                    # Run detection in background
-                    try:
-                        if hasattr(self.config, 'face_matcher') and self.config.face_matcher:
-                            matches = self.config.face_matcher.detect_and_match_faces_realtime(
-                                frame,
-                                self.lost_face_encodings,
-                                self.lost_face_names,
-                                threshold=0.5
-                            )
-                            # Store detections for this stream
-                            with self.lock:
-                                self.latest_detections[stream_name] = matches
-                                
-                            # Check for matches and log/save
-                            for match in matches:
-                                if match['found']:
-                                    name = match['name']
-                                    logger.info(f"🚨 FOUND: {name} in {stream_name} ({match['similarity']:.2f})")
-                                    # ... (save logic can be async or here if fast)
-                                    try:
-                                        from utils.helpers import save_detection_to_db
-                                        if hasattr(self.config, 'DETECTIONS_DB_FILE'):
-                                            record = {
-                                                'person_name': name,
-                                                'similarity': float(match['similarity']),
-                                                'stream_name': stream_name,
-                                                'timestamp': datetime.now().isoformat(),
-                                                'location': stream_info.get('location', 'Unknown')
-                                            }
-                                            save_detection_to_db(record, self.config.DETECTIONS_DB_FILE)
-                                    except ImportError: pass
-                                    except Exception: pass
-                    except Exception as e:
-                        logger.error(f"Inference error: {e}")
-
-                # --- Shared State Update ---
-                with self.lock: 
-                    self.latest_frames[stream_name] = frame 
-                    stream_info['last_update'] = datetime.now()
-                    stream_info['error_count'] = 0 
-                    stream_info['status'] = 'online'
-                
-                # FPS Control: Sleep less to drain buffer? 
-                # Actually, for low latency, we should barely sleep if our processing is fast.
-                time.sleep(0.01) # Reduced from 0.04 to minimize lag
-                
-            except Exception as e:
-                logger.error(f"Error in stream monitoring for {stream_name}: {e}")
-                with self.lock: 
-                    stream_info['error_count'] = stream_info.get('error_count', 0) + 1
-                    stream_info['status'] = 'error'
-                time.sleep(1)
         
-        # Release resources
-        if reader is not None:
-            reader.release()
-            logger.info(f"Released stream resources for {stream_name}")
+        try:
+            while self.running and stream_name in self.active_streams and self.active_streams[stream_name]['active']:
+                # CHECK BLOCK LIST
+                if stream_name in self.blocked_streams:
+                    logger.warning(f"⛔ Breaking loop for {stream_name}: BLOCKED")
+                    break
+
+                try:
+                    # Initialize or Reconnect
+                    if reader is None or not reader.isOpened():
+                        with self.lock:
+                            stream_info['status'] = 'connecting'
+                        
+                        # Connection Logic (Transport Options)
+                        # Force TCP for RTSP (better stability), but NOT for RTMP or port 1935 (non-standard)
+                        if stream_info['url'].lower().startswith('rtsp://') and ':1935' not in stream_info['url']:
+                            os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
+                        elif stream_info['url'].lower().startswith('rtmp://') or ':1935' in stream_info['url']:
+                            if "OPENCV_FFMPEG_CAPTURE_OPTIONS" in os.environ:
+                                del os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"]
+
+                        # Start Reader Thread
+                        if reader: 
+                            # Remove from global tracking if replacing
+                            if stream_name in self.stream_readers:
+                                del self.stream_readers[stream_name]
+                            reader.release()
+                        
+                        # DOUBLE CHECK ACTIVE STATUS before creating reader to prevent 'pop'
+                        if not self.active_streams[stream_name].get('active', False):
+                            logger.warning(f"Aborting reader creation for {stream_name} - stream inactive")
+                            break
+
+                        reader = StreamReader(stream_info['url'])
+                        
+                        # Track it globally
+                        self.stream_readers[stream_name] = reader
+
+                        
+                        time.sleep(1) # Give it a moment to connect
+                        
+                        if not reader.isOpened():
+                             # Auto-Healing Logic
+                             logger.warning(f"Stream {stream_name} failed to open. Attempting auto-port scan...")
+                             new_url = self._scan_and_fix_url(stream_info['url'])
+                             if new_url and new_url != stream_info['url']:
+                                   logger.info(f"Auto-Healing: Found open port! Switching {stream_info['url']} -> {new_url}")
+                                   with self.lock:
+                                       stream_info['url'] = new_url 
+                                   reader = StreamReader(new_url)
+                                   self.save_streams_to_db()
+
+                        if not reader.isOpened():
+                               logger.warning(f"Failed to open stream {stream_name}. Retrying in {reconnect_interval}s...")
+                               with self.lock:
+                                   stream_info['status'] = 'error'
+                               time.sleep(reconnect_interval)
+                               continue
+                        else:
+                            logger.info(f"Successfully connected to {stream_name}")
+                            with self.lock:
+                                stream_info['status'] = 'online'
+
+                    # Read Latest Frame
+                    frame = reader.read()
+                    
+                    if frame is None:
+                        if not reader.running or reader.status == 'error':
+                             logger.warning(f"Reader failed for {stream_name}. Reconnecting...")
+                             reader.release()
+                             reader = None
+                             continue
+                        else:
+                            time.sleep(0.1)
+                            continue
+
+                    # Resize
+                    if frame.shape[1] != 640 or frame.shape[0] != 480:
+                        frame = cv2.resize(frame, (640, 480))
+                    
+                    # Detection
+                    frame_count += 1
+                    if frame_count % 5 == 0:
+                        try:
+                            if hasattr(self.config, 'face_matcher') and self.config.face_matcher:
+                                matches = self.config.face_matcher.detect_and_match_faces_realtime(
+                                    frame,
+                                    self.lost_face_encodings,
+                                    self.lost_face_names,
+                                    threshold=0.5
+                                )
+                                with self.lock:
+                                    self.latest_detections[stream_name] = matches
+                                    
+                                for match in matches:
+                                    if match['found']:
+                                        name = match['name']
+                                        logger.info(f"🚨 FOUND: {name} in {stream_name} ({match['similarity']:.2f})")
+                                        try:
+                                            from utils.helpers import save_detection_to_db
+                                            detection_key = (stream_name, name)
+                                            current_time = time.time()
+                                            last_time = self.last_detection_times.get(detection_key, 0)
+                                            
+                                            if current_time - last_time > 60:
+                                                if hasattr(self.config, 'DETECTIONS_DB_FILE'):
+                                                    record = {
+                                                        'person_name': name,
+                                                        'similarity': float(match['similarity']),
+                                                        'stream_name': stream_name,
+                                                        'timestamp': datetime.now().isoformat(),
+                                                        'location': stream_info.get('location', 'Unknown')
+                                                    }
+                                                    save_detection_to_db(record, self.config.DETECTIONS_DB_FILE)
+                                                    self.last_detection_times[detection_key] = current_time
+                                            else:
+                                                pass
+                                        except: pass
+                        except Exception as e:
+                            logger.error(f"Inference error: {e}")
+
+                    if frame_count % 100 == 0:
+                        logger.debug(f"Stream {stream_name} loop running. Active: {self.active_streams[stream_name]['active']}")
+
+                    # Update Shared State
+                    with self.lock: 
+                        self.latest_frames[stream_name] = frame 
+                        stream_info['last_update'] = datetime.now()
+                        stream_info['error_count'] = 0 
+                        stream_info['status'] = 'online'
+                
+                    time.sleep(0.01) # Reduced from 0.04 to minimize lag
+                
+                except Exception as inner_e:
+                    logger.error(f"Error in stream monitor loop for {stream_name}: {inner_e}")
+                    time.sleep(1)
+        
+        finally:
+            logger.warning(f"🔄 EXITING _monitor_stream loop for {stream_name}")
+            # Release resources strictly
+            if reader is not None:
+                reader.release()
+                logger.info(f"Released stream resources for {stream_name}")
     
     def get_current_frame(self, stream_name, as_base64=False):
         """Get the latest frame, optionally with overlays enabled by caller or internal logic"""

@@ -95,7 +95,8 @@ def create_app(config_name='default'):
                 cap.release()
                 if ret and frame is not None:
                     logger.info("Webcam is available, adding webcam stream")
-                    success = cctv_manager.add_webcam_stream("Live Webcam", "Your Location")
+                    # Added active=False to keeping it OFF by default as requested
+                    success = cctv_manager.add_webcam_stream("Live Webcam", "Your Location", active=False)
                     if success:
                         logger.info("Webcam stream added successfully")
                         return True
