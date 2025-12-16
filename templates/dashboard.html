@@ -235,37 +235,6 @@
     function displayRecentDetections(detections) {
         const container = document.getElementById('recentDetections');
 
-        // Add custom scrollbar styles dynamically if not present
-        if (!document.getElementById('scrollbar-style')) {
-            const style = document.createElement('style');
-            style.id = 'scrollbar-style';
-            style.textContent = `
-                .recent-detections-scroll {
-                    max-height: 400px;
-                    overflow-y: auto;
-                    scrollbar-width: thin;
-                    scrollbar-color: #cbd5e0 #f7fafc;
-                }
-                .recent-detections-scroll::-webkit-scrollbar {
-                    width: 6px;
-                }
-                .recent-detections-scroll::-webkit-scrollbar-track {
-                    background: #f7fafc;
-                }
-                .recent-detections-scroll::-webkit-scrollbar-thumb {
-                    background-color: #cbd5e0;
-                    border-radius: 3px;
-                }
-                .detection-item {
-                    transition: background-color 0.2s;
-                }
-                .detection-item:hover {
-                    background-color: #f8f9fa;
-                }
-            `;
-            document.head.appendChild(style);
-        }
-
         if (detections.length === 0) {
             container.innerHTML = `
                 <div class="text-center text-muted py-4">
