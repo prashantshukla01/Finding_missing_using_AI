@@ -55,11 +55,24 @@ def get_recent_detections():
     """Get recent detections from advanced face matcher"""
     try:
         # Use the new face matcher to get recent detections
-        if face_matcher and hasattr(face_matcher, 'get_recent_detections'):
-            recent_detections = face_matcher.get_recent_detections(limit=50)
-            return jsonify(recent_detections)
+        # Read detections directly from database file
+        if config and hasattr(config, 'DETECTIONS_DB_FILE') and os.path.exists(config.DETECTIONS_DB_FILE):
+            with open(config.DETECTIONS_DB_FILE, 'r') as f:
+                detections = json.load(f)
+            
+            # Sort by timestamp descending
+            detections.sort(key=lambda x: x['timestamp'], reverse=True)
+            
+            # Map keys for frontend compatibility if needed
+            result = []
+            for d in detections[:50]:
+                item = d.copy()
+                if 'similarity' in d:
+                    item['confidence'] = d['similarity']
+                result.append(item)
+                
+            return jsonify(result)
         else:
-            # Fallback to empty list if face matcher not available
             return jsonify([])
             
     except Exception as e:

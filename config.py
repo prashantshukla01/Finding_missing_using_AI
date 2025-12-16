@@ -10,7 +10,7 @@ class Config:
     MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16MB max file size
     
     # Face Recognition Config
-    FACE_RECOGNITION_THRESHOLD = 0.6
+    FACE_RECOGNITION_THRESHOLD = 0.5
     FACE_QUALITY_THRESHOLD = 0.7
     
     # CCTV Config

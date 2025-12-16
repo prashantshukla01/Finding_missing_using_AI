@@ -109,17 +109,8 @@ def get_stream_frame(stream_name):
         
         if frame_base64:
             response_data['frame'] = frame_base64
-            
-            # Always run face detection for webcam streams
-            stream_info = cctv_manager.active_streams.get(stream_name, {})
-            if stream_info.get('url') == "0":  # Webcam stream
-                recent_detections = process_frame_for_detection(stream_name)
-                response_data['recent_detections'] = recent_detections
-            else:
-                # Optional: run detection for other streams if requested
-                if request.args.get('detect', 'false').lower() == 'true':
-                    recent_detections = process_frame_for_detection(stream_name)
-                    response_data['recent_detections'] = recent_detections
+            # Detection is already handled by CCTVManager
+            response_data['recent_detections'] = []
         
         return jsonify(response_data)
         

@@ -46,7 +46,7 @@
                                 <p class="text-muted">Select a stream from the list to view live footage</p>
                             </div>
                         </div>
-                        
+
                         <div id="streamInfo" class="mt-3" style="display: none;">
                             <div class="row">
                                 <div class="col-md-6">
@@ -123,20 +123,20 @@
                         <input type="text" class="form-control" id="streamName" required>
                         <div class="form-text">Unique identifier for this stream</div>
                     </div>
-                    
+
                     <div class="mb-3">
-                        <label for="rtspUrl" class="form-label">RTSP URL *</label>
-                        <input type="text" class="form-control" id="rtspUrl" required 
-                               placeholder="rtsp://username:password@ip:port/stream">
+                        <label for="rtspUrl" class="form-label">Stream URL (RTSP/RTMP) *</label>
+                        <input type="text" class="form-control" id="rtspUrl" required
+                            placeholder="rtsp://... or rtmp://...">
                         <div class="form-text">
-                            Format: rtsp://username:password@camera_ip:port/stream_path
+                            Supports RTSP (rtsp://) and RTMP (rtmp://) protocols
                         </div>
                     </div>
-                    
+
                     <div class="mb-3">
                         <label for="streamLocation" class="form-label">Location *</label>
-                        <input type="text" class="form-control" id="streamLocation" required 
-                               placeholder="e.g., Main Entrance, Parking Lot">
+                        <input type="text" class="form-control" id="streamLocation" required
+                            placeholder="e.g., Main Entrance, Parking Lot">
                     </div>
                 </form>
             </div>
@@ -163,13 +163,13 @@
                         <input type="text" class="form-control" id="personName" required>
                         <div class="form-text">Enter the full name of the missing person</div>
                     </div>
-                    
+
                     <div class="mb-3">
                         <label for="personImage" class="form-label">Photo *</label>
                         <input type="file" class="form-control" id="personImage" accept="image/*" required>
                         <div class="form-text">Upload a clear photo with the person's face visible</div>
                     </div>
-                    
+
                     <div id="personPreview" class="mb-3" style="display: none;">
                         <label class="form-label">Preview</label>
                         <div class="text-center">
@@ -195,12 +195,12 @@
             this.streamInterval = null;
             this.loadStreams();
             this.loadRecentDetections();
-            
+
             // Refresh streams every 10 seconds
             setInterval(() => this.loadStreams(), 10000);
             setInterval(() => this.loadRecentDetections(), 15000);
         }
-        
+
         async loadStreams() {
             try {
                 const response = await fetch('{{ url_for("cctv.get_streams") }}');
@@ -215,10 +215,10 @@
                 `;
             }
         }
-        
+
         displayStreams(streams) {
             const streamsList = document.getElementById('streamsList');
-            
+
             if (Object.keys(streams).length === 0) {
                 streamsList.innerHTML = `
                     <div class="text-center text-muted">
@@ -228,13 +228,27 @@
                 `;
                 return;
             }
-            
+
             let html = '';
             Object.entries(streams).forEach(([name, info]) => {
-                const isActive = info.active;
                 const isCurrent = this.currentStream === name;
                 const lastUpdate = info.last_update ? new Date(info.last_update).toLocaleTimeString() : 'Never';
-                
+                let statusClass = 'secondary';
+                let statusText = 'OFFLINE';
+
+                if (info.active) {
+                    if (info.status === 'online') {
+                        statusClass = 'success';
+                        statusText = 'ONLINE';
+                    } else if (info.status === 'connecting') {
+                        statusClass = 'warning';
+                        statusText = 'CONNECTING';
+                    } else {
+                        statusClass = 'danger';
+                        statusText = 'ERROR';
+                    }
+                }
+
                 html += `
                     <div class="stream-item card mb-2 ${isCurrent ? 'border-primary' : ''}" 
                          onclick="cctvUI.selectStream('${name}')" style="cursor: pointer;">
@@ -245,8 +259,8 @@
                                     <small class="text-muted">${info.location}</small>
                                 </div>
                                 <div class="text-end">
-                                    <span class="badge bg-${isActive ? 'success' : 'danger'}">
-                                        ${isActive ? 'ONLINE' : 'OFFLINE'}
+                                    <span class="badge bg-${statusClass}">
+                                        ${statusText}
                                     </span>
                                     <br>
                                     <small class="text-muted">${lastUpdate}</small>
@@ -256,39 +270,39 @@
                     </div>
                 `;
             });
-            
+
             streamsList.innerHTML = html;
         }
-        
+
         selectStream(streamName) {
             this.currentStream = streamName;
             this.loadStreams(); // Reload to update active state
             this.startStreamViewer(streamName);
         }
-        
+
         startStreamViewer(streamName) {
             // Clear previous interval
             if (this.streamInterval) {
                 clearInterval(this.streamInterval);
             }
-            
+
             // Update stream info
             this.updateStreamInfo(streamName);
-            
+
             // Start MJPEG stream
             this.startMJPEGStream(streamName);
-            
+
             // Keep updating stream info periodically
             this.streamInterval = setInterval(() => {
                 this.updateStreamInfo(streamName);
             }, 2000);
         }
-        
+
         startMJPEGStream(streamName) {
             const viewer = document.getElementById('streamViewer');
             const encodedStreamName = encodeURIComponent(streamName);
             const streamUrl = `/api/cctv/stream/${encodedStreamName}`;
-            
+
             viewer.innerHTML = `
                 <div class="position-relative">
                     <img id="liveStreamImg" 
@@ -296,7 +310,7 @@
                          class="img-fluid rounded" 
                          alt="Live Stream"
                          style="max-width: 100%; height: auto;"
-                         onerror="this.onerror=null; this.src='/static/images/stream-error.svg'; this.parentElement.innerHTML='<div class=\'text-center p-5 bg-danger text-white rounded\'><i class=\'fas fa-exclamation-triangle fa-2x mb-3\'></i><h5>Stream Error</h5><p>Failed to connect to stream</p><button class=\'btn btn-light btn-sm mt-2\' onclick=\'cctvUI.retryStream(\"${streamName}\")\'><i class=\'fas fa-redo\'></i> Retry</button></div>';">
+                         onerror="this.onerror=null; this.src='/static/images/stream-error.svg'; document.getElementById('streamViewer').innerHTML = '<div class=\'text-center p-5 bg-danger text-white rounded\'><i class=\'fas fa-exclamation-triangle fa-2x mb-3\'></i><h5>Stream Error</h5><p>Failed to connect to stream</p><button class=\'btn btn-light btn-sm mt-2\' onclick=\'cctvUI.retryStream(\&quot;' + '${streamName}' + '\&quot;)\'><i class=\'fas fa-redo\'></i> Retry</button></div>';">
                     <div class="position-absolute top-0 end-0 bg-dark text-white px-2 py-1 m-2 rounded">
                         <i class="fas fa-circle text-success"></i> LIVE MJPEG
                     </div>
@@ -306,11 +320,11 @@
                 </div>
             `;
         }
-        
+
         async updateStreamInfo(streamName) {
             const streams = await (await fetch('{{ url_for("cctv.get_streams") }}')).json();
             const streamInfo = streams[streamName];
-            
+
             if (streamInfo) {
                 document.getElementById('streamInfo').style.display = 'block';
                 document.getElementById('currentStreamName').textContent = streamName;
@@ -320,15 +334,15 @@
                         ${streamInfo.active ? 'ONLINE' : 'OFFLINE'}
                     </span>
                 `;
-                document.getElementById('currentStreamUpdate').textContent = 
+                document.getElementById('currentStreamUpdate').textContent =
                     streamInfo.last_update ? new Date(streamInfo.last_update).toLocaleString() : 'Never';
             }
         }
-        
+
         retryStream(streamName) {
             this.startMJPEGStream(streamName);
         }
-        
+
         async updateStreamFrame(streamName) {
             // This method is now used only as fallback or for testing
             // The main streaming is handled by MJPEG
@@ -383,7 +397,7 @@
         }
 
 
-        
+
         async loadRecentDetections() {
             try {
                 const response = await fetch('{{ url_for("api.get_recent_detections") }}');
@@ -393,10 +407,10 @@
                 console.error('Error loading detections:', error);
             }
         }
-        
+
         showDetections(detections) {
             const detectionsList = document.getElementById('detectionsList');
-            
+
             if (detections.length === 0) {
                 detectionsList.innerHTML = `
                     <div class="text-center text-muted">
@@ -405,15 +419,15 @@
                 `;
                 return;
             }
-            
+
             // Show only last 5 detections
             const recentDetections = detections.slice(-5).reverse();
-            
+
             let html = '';
             recentDetections.forEach(detection => {
                 const time = new Date(detection.timestamp).toLocaleString();
                 const confidencePercent = (detection.confidence * 100).toFixed(1);
-                
+
                 html += `
                     <div class="alert alert-warning detection-alert mb-2">
                         <div class="d-flex justify-content-between align-items-start">
@@ -429,31 +443,31 @@
                     </div>
                 `;
             });
-            
+
             detectionsList.innerHTML = html;
         }
     }
-    
+
     // Global function to add stream
     async function addStream() {
         const name = document.getElementById('streamName').value.trim();
         const url = document.getElementById('rtspUrl').value.trim();
         const location = document.getElementById('streamLocation').value.trim();
-        
+
         if (!name || !url || !location) {
             alert('Please fill all required fields');
             return;
         }
-        
+
         try {
             const response = await fetch('{{ url_for("cctv.add_cctv_stream") }}', {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({name, url, location})
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, url, location })
             });
-            
+
             const result = await response.json();
-            
+
             if (result.success) {
                 alert('Stream added successfully!');
                 document.getElementById('addStreamForm').reset();
@@ -466,7 +480,7 @@
             alert('Failed to add stream: ' + error.message);
         }
     }
-    
+
     // Initialize CCTV UI
     let cctvUI;
     document.addEventListener('DOMContentLoaded', () => {
@@ -474,23 +488,23 @@
         loadLostPersons();
         setupPersonImagePreview();
     });
-    
+
     // Missing Persons Management Functions
     function showAddPersonModal() {
         const modal = new bootstrap.Modal(document.getElementById('addPersonModal'));
         modal.show();
     }
-    
+
     function setupPersonImagePreview() {
         const fileInput = document.getElementById('personImage');
         const preview = document.getElementById('personPreview');
         const previewImg = document.getElementById('personPreviewImg');
-        
-        fileInput.addEventListener('change', function(e) {
+
+        fileInput.addEventListener('change', function (e) {
             const file = e.target.files[0];
             if (file) {
                 const reader = new FileReader();
-                reader.onload = function(e) {
+                reader.onload = function (e) {
                     previewImg.src = e.target.result;
                     preview.style.display = 'block';
                 };
@@ -500,17 +514,17 @@
             }
         });
     }
-    
+
     async function addLostPerson() {
         const name = document.getElementById('personName').value.trim();
         const fileInput = document.getElementById('personImage');
         const file = fileInput.files[0];
-        
+
         if (!name || !file) {
             alert('Please provide both name and photo');
             return;
         }
-        
+
         const formData = new FormData();
         formData.append('name', name);
         formData.append('age', ''); // Optional field
@@ -520,15 +534,15 @@
         formData.append('contact_info', ''); // Optional field
         formData.append('additional_notes', ''); // Optional field
         formData.append('image', file);
-        
+
         try {
             const response = await fetch('{{ url_for("person.upload_person") }}', {
                 method: 'POST',
                 body: formData
             });
-            
+
             const result = await response.json();
-            
+
             if (result.success) {
                 alert('Missing person added successfully!');
                 document.getElementById('addPersonForm').reset();
@@ -542,19 +556,19 @@
             alert('Failed to add missing person: ' + error.message);
         }
     }
-    
+
     async function loadLostPersons() {
         try {
             const lostPersonsList = document.getElementById('lostPersonsList');
             const countElement = document.getElementById('lostPersonsCount');
-            
+
             // Call the API to get persons
             const response = await fetch('{{ url_for("api.get_persons") }}');
             const persons = await response.json();
-            
+
             const personCount = Object.keys(persons).length;
             countElement.textContent = personCount;
-            
+
             if (personCount === 0) {
                 lostPersonsList.innerHTML = `
                     <div class="text-center text-muted">
@@ -564,7 +578,7 @@
                 `;
                 return;
             }
-            
+
             // Display persons
             let html = '';
             Object.entries(persons).forEach(([personId, person]) => {
@@ -590,9 +604,9 @@
                     </div>
                 `;
             });
-            
+
             lostPersonsList.innerHTML = html;
-            
+
         } catch (error) {
             console.error('Error loading lost persons:', error);
             const lostPersonsList = document.getElementById('lostPersonsList');
