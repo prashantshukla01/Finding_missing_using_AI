@@ -159,9 +159,12 @@ class CCTVManager:
         """Reload lost persons database after face_matcher is available"""
         self.load_lost_persons_database()
     
-    def add_lost_person(self, image_path, person_name):
+    def add_lost_person(self, image_path, person_name, display_name=None):
         """Add a new lost person to the database using insightface"""
         try:
+            if display_name is None:
+                display_name = person_name
+
             # Copy image to lost faces directory
             filename = f"{person_name}.jpg"
             destination = os.path.join(self.lost_faces_dir, filename)
@@ -189,7 +192,8 @@ class CCTVManager:
                     # Save to database
                     from utils.helpers import save_person_to_db
                     person_data = {
-                        'name': person_name,
+                        'name': person_name, # This is the ID/Filename
+                        'display_name': display_name, # Human readable name
                         'image_path': destination,
                         'embedding': embedding_data,
                         'age': '',
@@ -577,23 +581,39 @@ class CCTVManager:
                                     self.lost_face_names,
                                     threshold=0.5
                                 )
+                                if matches:
+                                    logger.debug(f"Matches found: {len(matches)} in {stream_name}")
+                                else:
+                                    # logger.debug(f"No matches in {stream_name}") 
+                                    pass
+
                                 with self.lock:
                                     self.latest_detections[stream_name] = matches
                                     
                                 for match in matches:
                                     if match['found']:
-                                        name = match['name']
-                                        logger.info(f"🚨 FOUND: {name} in {stream_name} ({match['similarity']:.2f})")
+                                        raw_name = match['name']
+                                        # Resolve display name for logging
+                                        display_name = raw_name
+                                        try:
+                                            from utils.helpers import load_persons_from_db
+                                            persons = load_persons_from_db(self.config.PERSONS_DB_FILE)
+                                            if raw_name in persons:
+                                                display_name = persons[raw_name].get('display_name', raw_name)
+                                        except: pass
+
+                                        logger.info(f"🚨 FOUND: {display_name} ({raw_name}) in {stream_name} ({match['similarity']:.2f})")
                                         try:
                                             from utils.helpers import save_detection_to_db
-                                            detection_key = (stream_name, name)
+                                            detection_key = (stream_name, raw_name)
                                             current_time = time.time()
                                             last_time = self.last_detection_times.get(detection_key, 0)
                                             
                                             if current_time - last_time > 60:
                                                 if hasattr(self.config, 'DETECTIONS_DB_FILE'):
                                                     record = {
-                                                        'person_name': name,
+                                                        'person_name': raw_name, # Process ID for DB consistency
+                                                        'display_name': display_name, # Save display name for easier access (optional)
                                                         'similarity': float(match['similarity']),
                                                         'stream_name': stream_name,
                                                         'timestamp': datetime.now().isoformat(),
@@ -681,17 +701,59 @@ class CCTVManager:
                 matches = self.latest_detections.get(stream_name, [])
             
             for match in matches:
-                if match['found']:
-                    x1, y1, x2, y2 = map(int, match['bbox'])
-                    name = match['name']
-                    confidence = match['similarity']
+                # Draw ALL detected faces
+                x1, y1, x2, y2 = map(int, match['bbox'])
+                raw_name = match.get('name', 'Unknown')
+                confidence = match.get('similarity', 0.0)
+                is_found = match.get('found', False)
+                
+                # Resolve display name for overlay
+                display_name = raw_name
+                
+                # 1. Try DB Lookup
+                try:
+                    from utils.helpers import load_persons_from_db
+                    persons = load_persons_from_db(self.config.PERSONS_DB_FILE)
                     
-                    color = (0, 0, 255) # Red for found
-                    label = f"FOUND: {name} ({confidence:.2f})"
-                    
-                    cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-                    cv2.putText(frame, label, (x1, y1-10),
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+                    found_in_db = False
+                    # Direct check failed? Try checking image_paths
+                    for p_id, p_data in persons.items():
+                        p_img_path = p_data.get('image_path', '')
+                        if not p_img_path: continue
+                        
+                        # Extract basename without extension
+                        p_filename = os.path.basename(p_img_path)
+                        p_stem = os.path.splitext(p_filename)[0]
+                        
+                        # Check complete match
+                        if p_stem == raw_name:
+                            display_name = p_data.get('display_name', p_data.get('name', raw_name))
+                            found_in_db = True
+                            break
+                            
+                    if not found_in_db:
+                         if raw_name in persons:
+                            display_name = persons[raw_name].get('display_name', raw_name)
+                            
+                except: pass
+                
+                # 3. Fallback: Strip UUID if it looks like one (contains underscore)
+                if display_name == raw_name and '_' in display_name:
+                    parts = display_name.split('_', 1)
+                    if len(parts) > 1:
+                        display_name = parts[1] # Take the part after the first underscore
+
+                if is_found:
+                    color = (0, 255, 0) # Green for match
+                    label = f"{display_name} ({confidence*100:.0f}%)"
+                else:
+                    display_name = "Unknown"
+                    color = (0, 0, 255) # Red for unknown
+                    label = "Unknown"
+
+                cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+                cv2.putText(frame, label, (x1, y1-10),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
                                
         if as_base64:
              ret, buffer = cv2.imencode('.jpg', frame)

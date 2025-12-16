@@ -63,12 +63,43 @@ def get_recent_detections():
             # Sort by timestamp descending
             detections.sort(key=lambda x: x['timestamp'], reverse=True)
             
+            # Load persons to get display names
+            persons = load_persons_from_db(config.PERSONS_DB_FILE)
+            
             # Map keys for frontend compatibility if needed
             result = []
             for d in detections[:50]:
                 item = d.copy()
                 if 'similarity' in d:
                     item['confidence'] = d['similarity']
+                
+                # Resolving Display Name
+                # Resolving Display Name
+                p_name = item.get('person_name')
+                if p_name:
+                    found_in_db = False
+                    # 1. Try finding by filename match in persons DB
+                    for p_id, p_data in persons.items():
+                        p_img_path = p_data.get('image_path', '')
+                        if not p_img_path: continue
+                        
+                        p_filename = os.path.basename(p_img_path)
+                        p_stem = os.path.splitext(p_filename)[0]
+                        
+                        if p_stem == p_name:
+                            item['person_name'] = p_data.get('display_name', p_data.get('name', p_name))
+                            found_in_db = True
+                            break
+                            
+                    if not found_in_db:
+                        if p_name in persons and 'display_name' in persons[p_name]:
+                            item['person_name'] = persons[p_name]['display_name']
+                        elif '_' in p_name:
+                            # Fallback: Try to strip UUID if strictly assuming UUID_Name format
+                            parts = p_name.split('_', 1)
+                            if len(parts) > 1:
+                                item['person_name'] = parts[1]
+                
                 result.append(item)
                 
             return jsonify(result)

@@ -179,9 +179,14 @@ def create_app(config_name='default'):
             
             logger.info(f"Adding lost person: {name}")
             
-            # Secure the filename
-            filename = secure_filename(f"{name}.jpg")
-            logger.info(f"Secure filename: {filename}")
+            # Generate Unique ID
+            import uuid
+            unique_id = f"{uuid.uuid4()}"
+            safe_name = secure_filename(name)
+            
+            # Use UUID for filename/internal ID
+            filename = secure_filename(f"{unique_id}_{safe_name}.jpg")
+            logger.info(f"Generated filename with UUID: {filename}")
             
             # Save the file temporarily
             temp_path = os.path.join('data', 'uploads', 'temp', filename)
@@ -192,7 +197,9 @@ def create_app(config_name='default'):
             logger.info(f"File saved to: {temp_path}")
             
             # Add to lost persons database
-            success = cctv_manager.add_lost_person(temp_path, name)
+            # Pass unique_id+name as the ID, and original name as display name
+            person_id_name = f"{unique_id}_{safe_name}"
+            success = cctv_manager.add_lost_person(temp_path, person_id_name, display_name=name)
             logger.info(f"add_lost_person returned: {success}")
             
             if success:
