@@ -1,7 +1,9 @@
-from flask import Blueprint, render_template, request, jsonify
+from flask import Blueprint, render_template, request, jsonify, send_file, abort
 import logging
 import os
-from utils.helpers import save_person_to_db, load_persons_from_db, save_uploaded_file, allowed_file
+from datetime import datetime
+from utils.helpers import save_uploaded_file, allowed_file
+from models.db_models import db, Person
 
 logger = logging.getLogger(__name__)
 
@@ -10,13 +12,15 @@ person_bp = Blueprint('person', __name__, url_prefix='/person')
 # Global variables that will be initialized
 face_matcher = None
 app_config = None
+cctv_manager = None
 
-def init_person_routes(config, face_matcher_instance):
+def init_person_routes(config, face_matcher_instance, cctv_manager_instance=None):
     """Initialize the person routes with configuration"""
-    global app_config, face_matcher
+    global app_config, face_matcher, cctv_manager
     app_config = config
     face_matcher = face_matcher_instance
-    logger.info("Person routes initialized with config")
+    cctv_manager = cctv_manager_instance
+    logger.info("Person routes initialized with config and dependencies")
 
 @person_bp.route('/test')
 def test_config():
@@ -28,8 +32,6 @@ def test_config():
         'config_exists': app_config is not None,
         'has_upload_folder': hasattr(app_config, 'UPLOAD_FOLDER'),
         'upload_folder': getattr(app_config, 'UPLOAD_FOLDER', 'MISSING'),
-        'has_persons_db': hasattr(app_config, 'PERSONS_DB_FILE'),
-        'persons_db': getattr(app_config, 'PERSONS_DB_FILE', 'MISSING'),
         'face_matcher_exists': face_matcher is not None
     }
     
@@ -59,18 +61,16 @@ def upload_person():
             return jsonify({'success': False, 'error': 'System configuration error - Upload folder not configured'}), 500
 
         # Extract form data
-        person_data = {
-            'name': request.form.get('name', '').strip(),
-            'age': request.form.get('age', '').strip(),
-            'last_seen_location': request.form.get('last_seen_location', '').strip(),
-            'last_seen_time': request.form.get('last_seen_time', '').strip(),
-            'description': request.form.get('description', '').strip(),
-            'contact_info': request.form.get('contact_info', '').strip(),
-            'additional_notes': request.form.get('additional_notes', '').strip()
-        }
+        name = request.form.get('name', '').strip()
+        age = request.form.get('age', '').strip()
+        last_seen_location = request.form.get('last_seen_location', '').strip()
+        last_seen_time = request.form.get('last_seen_time', '').strip()
+        description = request.form.get('description', '').strip()
+        contact_info = request.form.get('contact_info', '').strip()
+        additional_notes = request.form.get('additional_notes', '').strip()
         
         # Validate required fields
-        if not person_data['name']:
+        if not name:
             return jsonify({'success': False, 'error': 'Name is required'}), 400
         
         if 'image' not in request.files:
@@ -94,10 +94,8 @@ def upload_person():
         if error:
             return jsonify({'success': False, 'error': f'File upload failed: {error}'}), 400
         
-        person_data['image_path'] = image_path
-        
         # Extract face embeddings
-        logger.info(f"Extracting embeddings for {person_data['name']}")
+        logger.info(f"Extracting embeddings for {name}")
         embedding = face_matcher.extract_embeddings(image_path)
         
         if embedding is None:
@@ -117,36 +115,105 @@ def upload_person():
                 pass
             return jsonify({'success': False, 'error': f'Face quality issue: {quality_message}'}), 400
         
-        person_data['embedding'] = embedding
+        # Create and save new person
+        import uuid
+        person_id = str(uuid.uuid4())
         
-        # Save to database
-        if not hasattr(app_config, 'PERSONS_DB_FILE'):
-            return jsonify({'success': False, 'error': 'Database configuration error'}), 500
-            
-        person_id = save_person_to_db(person_data, app_config.PERSONS_DB_FILE)
+        new_person = Person(
+            id=person_id,
+            name=name,
+            display_name=name,
+            age=age,
+            description=description,
+            last_seen_location=last_seen_location,
+            last_seen_time=last_seen_time,
+            contact_info=contact_info,
+            additional_notes=additional_notes,
+            image_path=image_path,
+            embedding=embedding,
+            created_at=datetime.utcnow()
+        )
         
-        if person_id:
-            logger.info(f"Successfully registered person: {person_data['name']} with ID: {person_id}")
-            return jsonify({
-                'success': True,
-                'person_id': person_id,
-                'message': f'Person {person_data["name"]} registered successfully and is now being monitored'
-            })
-        else:
-            return jsonify({'success': False, 'error': 'Failed to save person data'}), 500
+        db.session.add(new_person)
+        db.session.commit()
+        
+        logger.info(f"Successfully registered person: {name} with ID: {person_id}")
+        return jsonify({
+            'success': True,
+            'person_id': person_id,
+            'message': f'Person {name} registered successfully and is now being monitored'
+        })
             
     except Exception as e:
         logger.error(f"Error in person upload: {e}")
+        db.session.rollback()
         return jsonify({'success': False, 'error': f'Internal server error: {str(e)}'}), 500
 
 @person_bp.route('/list')
 def list_persons():
     """Display list of all registered persons"""
     try:
-        persons = {}
-        if app_config and hasattr(app_config, 'PERSONS_DB_FILE'):
-            persons = load_persons_from_db(app_config.PERSONS_DB_FILE)
+        persons_list = Person.query.all()
+        # Convert to dictionary keyed by ID for template compatibility
+        persons = {p.id: p.to_dict() for p in persons_list}
         return render_template('person_list.html', persons=persons)
     except Exception as e:
         logger.error(f"Error loading persons list: {e}")
         return render_template('person_list.html', persons={})
+
+@person_bp.route('/image/<person_id>')
+def get_person_image(person_id):
+    """Serve person image"""
+    try:
+        person = Person.query.get(person_id)
+        
+        if not person or not person.image_path:
+            return abort(404)
+        
+        if not os.path.exists(person.image_path):
+            return abort(404)
+            
+        return send_file(person.image_path)
+    except Exception as e:
+        logger.error(f"Error serving image for person {person_id}: {e}")
+        return abort(404)
+
+@person_bp.route('/delete/<person_id>', methods=['POST'])
+def delete_person(person_id):
+    """Delete a person from the database"""
+    try:
+        person = Person.query.get(person_id)
+        
+        if not person:
+            return jsonify({'success': False, 'error': 'Person not found'}), 404
+            
+        # Get image path before deleting data
+        image_path = person.image_path
+        
+        # Delete from DB
+        db.session.delete(person)
+        db.session.commit()
+            
+        # Try to delete the image file
+        if image_path and os.path.exists(image_path):
+            try:
+                os.remove(image_path)
+                logger.info(f"Deleted image file: {image_path}")
+            except Exception as e:
+                logger.warning(f"Failed to delete image file {image_path}: {e}")
+                
+        # Reload CCTV manager to update in-memory face database
+        if cctv_manager:
+            try:
+                cctv_manager.reload_lost_persons_database()
+                logger.info("Reloaded CCTV manager face database")
+            except Exception as e:
+                logger.error(f"Failed to reload CCTV manager database: {e}")
+        
+        logger.info(f"Successfully deleted person {person_id}")
+        return jsonify({'success': True, 'message': 'Person deleted successfully'})
+        
+    except Exception as e:
+        logger.error(f"Error deleting person {person_id}: {e}")
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500

@@ -235,6 +235,37 @@
     function displayRecentDetections(detections) {
         const container = document.getElementById('recentDetections');
 
+        // Add custom scrollbar styles dynamically if not present
+        if (!document.getElementById('scrollbar-style')) {
+            const style = document.createElement('style');
+            style.id = 'scrollbar-style';
+            style.textContent = `
+                .recent-detections-scroll {
+                    max-height: 400px;
+                    overflow-y: auto;
+                    scrollbar-width: thin;
+                    scrollbar-color: #cbd5e0 #f7fafc;
+                }
+                .recent-detections-scroll::-webkit-scrollbar {
+                    width: 6px;
+                }
+                .recent-detections-scroll::-webkit-scrollbar-track {
+                    background: #f7fafc;
+                }
+                .recent-detections-scroll::-webkit-scrollbar-thumb {
+                    background-color: #cbd5e0;
+                    border-radius: 3px;
+                }
+                .detection-item {
+                    transition: background-color 0.2s;
+                }
+                .detection-item:hover {
+                    background-color: #f8f9fa;
+                }
+            `;
+            document.head.appendChild(style);
+        }
+
         if (detections.length === 0) {
             container.innerHTML = `
                 <div class="text-center text-muted py-4">
@@ -245,27 +276,39 @@
             return;
         }
 
-        let html = '';
-        const recent = detections.slice(-8).reverse(); // Show last 8 detections
+        let html = '<div class="recent-detections-scroll pr-2">';
+        const recent = detections; // Show all returned (API limits to 50)
 
         recent.forEach(detection => {
             const time = new Date(detection.timestamp).toLocaleTimeString();
             const confidence = (detection.confidence * 100).toFixed(1);
 
+            // Color code confidence
+            let badgeClass = 'bg-secondary';
+            if (detection.confidence > 0.8) badgeClass = 'bg-success';
+            else if (detection.confidence > 0.6) badgeClass = 'bg-info';
+            else badgeClass = 'bg-warning text-dark';
+
             html += `
-                <div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-2">
+                <div class="detection-item d-flex justify-content-between align-items-center border-bottom py-3 px-2">
                     <div>
-                        <strong>${detection.person_name}</strong>
-                        <br>
-                        <small class="text-muted">${detection.stream_name} • ${confidence}% match</small>
+                        <div class="d-flex align-items-center">
+                            <strong>${detection.person_name}</strong>
+                            <span class="badge ${badgeClass} ms-2" style="font-size: 0.7em;">${confidence}%</span>
+                        </div>
+                        <small class="text-muted">
+                            <i class="fas fa-video me-1"></i> ${detection.stream_name}
+                            <i class="fas fa-map-marker-alt ms-2 me-1"></i> ${detection.location || 'Unknown'}
+                        </small>
                     </div>
                     <div class="text-end">
-                        <small class="text-muted">${time}</small>
+                        <small class="text-muted fw-bold">${time}</small>
                     </div>
                 </div>
             `;
         });
 
+        html += '</div>';
         container.innerHTML = html;
     }
 

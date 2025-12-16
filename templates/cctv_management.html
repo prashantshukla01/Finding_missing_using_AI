@@ -153,6 +153,15 @@
                                 placeholder="e.g., 77.2090">
                         </div>
                     </div>
+
+                    <div class="mb-3">
+                        <button type="button" class="btn btn-outline-primary btn-sm w-100 mb-2"
+                            onclick="useCurrentLocation()">
+                            <i class="fas fa-location-arrow"></i> Use My Current Location
+                        </button>
+                        <div id="pickerMap"></div>
+                        <div class="form-text text-center">Click on the map to set location or drag the marker</div>
+                    </div>
                 </form>
             </div>
             <div class="modal-footer">
@@ -202,8 +211,111 @@
 </div>
 {% endblock %}
 
+{% block extra_css %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+<style>
+    #pickerMap {
+        height: 300px;
+        width: 100%;
+        border-radius: 0.25rem;
+        border: 1px solid #ced4da;
+        margin-top: 10px;
+        cursor: crosshair;
+    }
+</style>
+{% endblock %}
+
 {% block extra_js %}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 <script>
+    let pickerMap;
+    let pickerMarker;
+
+    function initPickerMap() {
+        if (pickerMap) return; // Already initialized
+
+        // Default to Connaught Place, New Delhi if no location set
+        const defaultLat = 28.6315;
+        const defaultLng = 77.2167;
+
+        pickerMap = L.map('pickerMap').setView([defaultLat, defaultLng], 13);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(pickerMap);
+
+        // Click handler
+        pickerMap.on('click', function (e) {
+            updateLocationFromMap(e.latlng.lat, e.latlng.lng);
+        });
+    }
+
+    function updateLocationFromMap(lat, lng) {
+        // Update inputs
+        document.getElementById('streamLat').value = lat.toFixed(6);
+        document.getElementById('streamLng').value = lng.toFixed(6);
+
+        // Update marker
+        if (pickerMarker) {
+            pickerMarker.setLatLng([lat, lng]);
+        } else {
+            pickerMarker = L.marker([lat, lng], { draggable: true }).addTo(pickerMap);
+            // Drag handler
+            pickerMarker.on('dragend', function (e) {
+                const position = e.target.getLatLng();
+                document.getElementById('streamLat').value = position.lat.toFixed(6);
+                document.getElementById('streamLng').value = position.lng.toFixed(6);
+            });
+        }
+
+        pickerMap.setView([lat, lng], pickerMap.getZoom());
+    }
+
+    function useCurrentLocation() {
+        const btn = document.querySelector('button[onclick="useCurrentLocation()"]');
+        const originalText = btn.innerHTML;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Locating...';
+        btn.disabled = true;
+
+        if (!navigator.geolocation) {
+            alert("Geolocation is not supported by your browser");
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+            return;
+        }
+
+        navigator.geolocation.getCurrentPosition(
+            (position) => {
+                const lat = position.coords.latitude;
+                const lng = position.coords.longitude;
+
+                // Update map and inputs
+                if (!pickerMap) initPickerMap();
+                updateLocationFromMap(lat, lng);
+
+                // Also try to reverse geocode to get address for "Location" field
+                // Simple placeholder for now, user can edit
+                const locInput = document.getElementById('streamLocation');
+                if (!locInput.value) {
+                    locInput.value = "My Current Location";
+                }
+
+                btn.innerHTML = '<i class="fas fa-check"></i> Found';
+                setTimeout(() => {
+                    btn.innerHTML = originalText;
+                    btn.disabled = false;
+                }, 2000);
+            },
+            (error) => {
+                console.error("Error getting location:", error);
+                alert("Unable to retrieve your location. Please check browser permissions.");
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+            }
+        );
+    }
+
     class CCTVManagerUI {
         constructor() {
             this.currentStream = null;
@@ -212,8 +324,14 @@
             this.loadRecentDetections();
 
             // Refresh streams every 10 seconds
-            setInterval(() => this.loadStreams(), 10000);
-            setInterval(() => this.loadRecentDetections(), 15000);
+            setInterval(() => {
+                if (!document.hidden) this.loadStreams();
+            }, 10000);
+
+            // Refresh detections every 15 seconds
+            setInterval(() => {
+                if (!document.hidden) this.loadRecentDetections();
+            }, 15000);
         }
 
         async loadStreams() {
@@ -312,7 +430,7 @@
 
             // Keep updating stream info periodically
             this.streamInterval = setInterval(() => {
-                this.updateStreamInfo(streamName);
+                if (!document.hidden) this.updateStreamInfo(streamName);
             }, 2000);
         }
 
@@ -602,11 +720,20 @@
     }
 
     // Initialize CCTV UI
-    let cctvUI;
+    // Initialize
     document.addEventListener('DOMContentLoaded', () => {
-        cctvUI = new CCTVManagerUI();
+        window.cctvUI = new CCTVManagerUI();
         loadLostPersons();
         setupPersonImagePreview();
+
+        // Initialize map when modal is shown
+        const msgModal = document.getElementById('addStreamModal');
+        msgModal.addEventListener('shown.bs.modal', function () {
+            if (!pickerMap) {
+                initPickerMap();
+            }
+            pickerMap.invalidateSize();
+        });
     });
 
     // Missing Persons Management Functions

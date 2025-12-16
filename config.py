@@ -19,9 +19,10 @@ class Config:
     
     # Database Config
     DATABASE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'database')
-    PERSONS_DB_FILE = os.path.join(DATABASE_PATH, 'persons.json')
-    CCTV_DB_FILE = os.path.join(DATABASE_PATH, 'cctv_streams.json')
-    DETECTIONS_DB_FILE = os.path.join(DATABASE_PATH, 'detections.json')
+    SQLALCHEMY_DATABASE_URI = f'sqlite:///{os.path.join(DATABASE_PATH, "detection_system.db")}'
+    SQLALCHEMY_TRACK_MODIFICATIONS = False
+    
+    # PERSONS_DB_FILE, CCTV_DB_FILE, DETECTIONS_DB_FILE removed as part of SQLite migration
     
     # Model Config
     INSIGHTFACE_MODEL = 'buffalo_l'

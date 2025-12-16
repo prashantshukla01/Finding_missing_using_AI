@@ -30,27 +30,33 @@ def create_app(config_name='default'):
     """Application factory pattern"""
     app = Flask(__name__)
     app_config = config[config_name]()
+    app.config.from_object(app_config)
     app_config.init_app(app)
+    
+    # Initialize Database
+    from models.db_models import db
+    db.init_app(app)
     
     # Initialize components
     try:
-        # MANUAL WORK: These might take time to download models on first run
-        logger.info("Initializing Face Matcher...")
-        face_matcher = AdvancedFaceMatcher()
-        
-        logger.info("Initializing CCTV Manager...")
-        cctv_manager = CCTVManager(app_config)
-        app_config.face_matcher = face_matcher
-        
-        # Reload lost persons database now that face_matcher is available
-        cctv_manager.reload_lost_persons_database()
+        with app.app_context():
+            # MANUAL WORK: These might take time to download models on first run
+            logger.info("Initializing Face Matcher...")
+            face_matcher = AdvancedFaceMatcher()
+            
+            logger.info("Initializing CCTV Manager...")
+            cctv_manager = CCTVManager(app_config, app=app)
+            app_config.face_matcher = face_matcher
+            
+            # Reload lost persons database now that face_matcher is available
+            cctv_manager.reload_lost_persons_database()
 
     except Exception as e:
         logger.error(f"Failed to initialize components: {e}")
         raise
     
     # Initialize routes with dependencies - PASS app_config NOT app.config
-    init_person_routes(app_config, face_matcher)
+    init_person_routes(app_config, face_matcher, cctv_manager)
     init_cctv_routes(app_config, cctv_manager, face_matcher)
     init_api_routes(app_config, cctv_manager, face_matcher)
     
@@ -96,7 +102,14 @@ def create_app(config_name='default'):
                 if ret and frame is not None:
                     logger.info("Webcam is available, adding webcam stream")
                     # Added active=False to keeping it OFF by default as requested
-                    success = cctv_manager.add_webcam_stream("Live Webcam", "Your Location", active=False)
+                    # Default to Connaught Place, New Delhi for map visualization
+                    success = cctv_manager.add_webcam_stream(
+                        "Live Webcam", 
+                        "Connaught Place, Delhi", 
+                        lat=28.6315, 
+                        lng=77.2167, 
+                        active=False
+                    )
                     if success:
                         logger.info("Webcam stream added successfully")
                         return True
@@ -112,15 +125,16 @@ def create_app(config_name='default'):
         return False
 
     # Add webcam stream
-    webcam_added = add_webcam_for_testing()
+    with app.app_context():
+        webcam_added = add_webcam_for_testing()
 
-    if not webcam_added:
-        logger.info("Using demo stream instead of webcam")
-        # Ensure demo stream exists
-        try:
-            cctv_manager.add_stream("Demo Stream", "demo", "Test Location")
-        except:
-            pass
+        if not webcam_added:
+            logger.info("Using demo stream instead of webcam")
+            # Ensure demo stream exists
+            try:
+                cctv_manager.add_stream("Demo Stream", "demo", "Test Location")
+            except:
+                pass
     @app.route('/api/cctv/stream/<name>/frame')
     def get_stream_frame(name):
         try:

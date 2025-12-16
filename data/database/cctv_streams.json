@@ -5,7 +5,7 @@
     "lat": null,
     "lng": null,
     "active": false,
-    "added_date": "2025-12-17T00:37:34.373810"
+    "added_date": "2025-12-17T02:13:36.815458"
   },
   "mobile1": {
     "url": "rtsp://admin:admin@192.168.29.90:1935",
@@ -13,14 +13,22 @@
     "lat": null,
     "lng": null,
     "active": false,
-    "added_date": "2025-12-17T00:37:34.374613"
+    "added_date": "2025-12-17T02:13:36.815756"
+  },
+  "Hostel": {
+    "url": "rtsp://admin:admin@192.168.29.90:1935",
+    "location": "College",
+    "lat": "28.751669",
+    "lng": "77.499529",
+    "active": false,
+    "added_date": "2025-12-17T02:13:36.816311"
   },
   "Live Webcam": {
     "url": "0",
-    "location": "Your Location",
-    "lat": null,
-    "lng": null,
+    "location": "Connaught Place, Delhi",
+    "lat": 28.6315,
+    "lng": 77.2167,
     "active": false,
-    "added_date": "2025-12-17T00:37:37.169760"
+    "added_date": "2025-12-17T02:13:39.845957"
   }
 }

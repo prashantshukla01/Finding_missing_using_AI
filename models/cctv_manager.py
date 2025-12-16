@@ -20,8 +20,12 @@ class StreamReader:
     def __init__(self, url):
         self.url = url
         # Handle webcam index
+        # Handle webcam index
         if str(url).isdigit():
             self.cap = cv2.VideoCapture(int(url))
+        elif str(url).lower() in ['demo', 'webcam', 'camera']:
+            logger.info(f"Opening default camera for stream URL: {url}")
+            self.cap = cv2.VideoCapture(0)
         else:
             self.cap = cv2.VideoCapture(url)
             
@@ -77,15 +81,18 @@ class StreamReader:
         self.cap = cv2.VideoCapture(self.url)
 
 class CCTVManager:
-    def __init__(self, config):
+    def __init__(self, config, app=None):
         self.config = config
+        self.app = app
         self.active_streams = {}
         # Stores the latest frame for each stream: {stream_name: frame}
         self.latest_frames = {}
         # Lock for thread-safe access to active_streams and latest_frames
         self.lock = threading.Lock()
         
-        self.stream_threads = {}
+        self.person_name_map = {}
+        
+        self.stream_readers = {}
         self.running = True  # Global running flag
         self.latest_detections = {} # Cache for background detections
         self.last_detection_times = {} # Check for duplicate detections: {(stream_name, person_name): timestamp}
@@ -104,53 +111,47 @@ class CCTVManager:
         logger.info("CCTV Manager initialized successfully")
     
     def load_lost_persons_database(self):
-        """Load and encode all lost persons from the database directory using insightface"""
+        """Load and encode all lost persons from the SQLite database"""
         try:
-            if not os.path.exists(self.lost_faces_dir):
-                os.makedirs(self.lost_faces_dir, exist_ok=True)
-                logger.info(f"Created lost persons directory: {self.lost_faces_dir}")
-                return
+            from models.db_models import Person, db
             
             with self.lock:
                 self.lost_face_encodings = []
                 self.lost_face_names = []
             
-            image_files = [f for f in os.listdir(self.lost_faces_dir) 
-                          if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
+            persons = Person.query.all()
+            logger.info(f"Loading {len(persons)} persons from database")
             
-            logger.info(f"Found {len(image_files)} images in lost persons database")
-            
-            # Check if face_matcher is available
-            if not hasattr(self.config, 'face_matcher'):
-                logger.warning("Face matcher not available yet, skipping face encoding for existing images")
-                return
-            
-            for image_file in image_files:
-                try:
-                    image_path = os.path.join(self.lost_faces_dir, image_file)
-                    
-                    # Use insightface to extract embeddings directly
-                    embedding_data = self.config.face_matcher.extract_embeddings(image_path)
-                    
-                    if embedding_data is not None:
-                        # Validate face quality
-                        is_valid, message = self.config.face_matcher.validate_face_quality(embedding_data)
-                        
-                        if is_valid:
-                            # Extract name from filename (remove extension)
-                            name = os.path.splitext(image_file)[0]
-                            self.lost_face_encodings.append(embedding_data['insightface'])
-                            self.lost_face_names.append(name)
-                            logger.info(f"✅ Encoded lost person: {name}")
-                        else:
-                            logger.warning(f"⚠️ Face quality check failed for {image_file}: {message}")
+            count = 0
+            for person in persons:
+                if person.embedding:
+                    if isinstance(person.embedding, dict) and 'insightface' in person.embedding:
+                        self.lost_face_encodings.append(person.embedding['insightface'])
                     else:
-                        logger.warning(f"⚠️ No face found in {image_file}")
+                        # Handle case where it might already be a list or direct embedding
+                        self.lost_face_encodings.append(person.embedding)
                         
-                except Exception as e:
-                    logger.error(f"❌ Error processing {image_file}: {e}")
+                    self.lost_face_names.append(person.name)
+                    self.person_name_map[person.name] = person.display_name or person.name
+                    count += 1
+                elif person.image_path and os.path.exists(person.image_path) and hasattr(self.config, 'face_matcher'):
+                     # Fallback: Generate embedding if missing in DB but have image
+                     logger.info(f"Generating missing embedding for {person.name}")
+                     embedding_data = self.config.face_matcher.extract_embeddings(person.image_path)
+                     if embedding_data:
+                         person.embedding = embedding_data
+                         self.lost_face_encodings.append(embedding_data['insightface'])
+                         self.lost_face_names.append(person.name)
+                         count += 1
             
-            logger.info(f"✅ Loaded {len(self.lost_face_names)} lost persons into database")
+            # Commit any new embeddings generated
+            if hasattr(self.config, 'face_matcher'):
+                try:
+                    db.session.commit()
+                except:
+                    db.session.rollback()
+            
+            logger.info(f"✅ Loaded {count} lost persons into memory")
             
         except Exception as e:
             logger.error(f"❌ Error loading lost persons database: {e}")
@@ -190,29 +191,24 @@ class CCTVManager:
                         self.lost_face_names.append(person_name)
                     
                     # Save to database
-                    from utils.helpers import save_person_to_db
-                    person_data = {
-                        'name': person_name, # This is the ID/Filename
-                        'display_name': display_name, # Human readable name
-                        'image_path': destination,
-                        'embedding': embedding_data,
-                        'age': '',
-                        'description': 'Added via API',
-                        'last_seen_location': 'Unknown',
-                        'last_seen_time': datetime.now().isoformat(),
-                        'contact_info': '',
-                        'additional_notes': ''
-                    }
+                    from models.db_models import Person, db
+                    from datetime import datetime
                     
-                    if hasattr(self.config, 'PERSONS_DB_FILE'):
-                        person_id = save_person_to_db(person_data, self.config.PERSONS_DB_FILE)
-                        if person_id:
-                            logger.info(f"✅ Added new lost person: {person_name} with ID: {person_id}")
-                        else:
-                            logger.warning(f"⚠️ Added {person_name} to memory but failed to save to database")
-                    else:
-                        logger.warning(f"⚠️ No PERSONS_DB_FILE configured, {person_name} added to memory only")
+                    new_person = Person(
+                        id=person_name, # Using filename UUID as ID for consistency
+                        name=person_name,
+                        display_name=display_name,
+                        image_path=destination,
+                        embedding=embedding_data,
+                        description='Added via API',
+                        last_seen_location='Unknown',
+                        last_seen_time=datetime.now().isoformat(),
+                        created_at=datetime.utcnow()
+                    )
                     
+                    db.session.add(new_person)
+                    db.session.commit()
+                    logger.info(f"✅ Added new lost person: {person_name}")
                     return True
                 else:
                     logger.warning(f"⚠️ Face quality check failed for {person_name}: {message}")
@@ -226,58 +222,59 @@ class CCTVManager:
             return False
     
     def load_streams_from_db(self):
-        """Load CCTV streams from database file"""
+        """Load CCTV streams from SQLite database"""
         try:
-            if not hasattr(self.config, 'CCTV_DB_FILE'):
-                return
-                
-            if not os.path.exists(self.config.CCTV_DB_FILE):
-                return
-                
-            with open(self.config.CCTV_DB_FILE, 'r') as f:
-                content = f.read().strip()
-                if not content:
-                    return
-                streams_data = json.loads(content)
-                    
-            for stream_name, stream_info in streams_data.items():
+            from models.db_models import Stream
+            
+            streams = Stream.query.all()
+            
+            for stream in streams:
                 # Force all streams to start as INACTIVE/OFFLINE by default as requested
                 self.add_stream(
-                    stream_name,
-                    stream_info['url'],
-                    stream_info['location'],
-                    lat=stream_info.get('lat'),
-                    lng=stream_info.get('lng'),
+                    stream.name,
+                    stream.source_url,
+                    stream.location,
+                    lat=stream.lat,
+                    lng=stream.lng,
                     start_monitoring=False # User requested all toggles off by default
                 )
                 
-            logger.info(f"Loaded {len(streams_data)} streams from database (Started as INACTIVE)")
+            logger.info(f"Loaded {len(streams)} streams from database (Started as INACTIVE)")
         except Exception as e:
             logger.error(f"Error loading CCTV database: {e}")
     
     def save_streams_to_db(self):
-        """Save CCTV streams to database file"""
+        """Save CCTV streams to SQLite database"""
         try:
-            if not hasattr(self.config, 'CCTV_DB_FILE'):
-                return
-                
-            streams_data = {}
-            with self.lock:
-                for stream_name, stream_info in self.active_streams.items():
-                    streams_data[stream_name] = {
-                        'url': stream_info['url'],
-                        'location': stream_info['location'],
-                        'lat': stream_info.get('lat'),
-                        'lng': stream_info.get('lng'),
-                        'active': stream_info.get('active', True),
-                        'added_date': stream_info.get('added_date', datetime.now().isoformat())
-                    }
+            from models.db_models import Stream, db
             
-            with open(self.config.CCTV_DB_FILE, 'w') as f:
-                json.dump(streams_data, f, indent=2)
+            with self.lock:
+                current_streams = self.active_streams.copy()
+            
+            for name, info in current_streams.items():
+                stream = Stream.query.filter_by(name=name).first()
+                if stream:
+                    stream.source_url = info['url']
+                    stream.location = info['location']
+                    stream.lat = info.get('lat')
+                    stream.lng = info.get('lng')
+                    stream.active = info.get('active', False)
+                else:
+                    new_stream = Stream(
+                        name=name,
+                        source_url=info['url'],
+                        location=info['location'],
+                        lat=info.get('lat'),
+                        lng=info.get('lng'),
+                        active=info.get('active', False)
+                    )
+                    db.session.add(new_stream)
+            
+            db.session.commit()
                 
         except Exception as e:
-            logger.error(f"Error saving CCTV database: {e}")
+            logger.error(f"Error saving CCTV streams to DB: {e}")
+            db.session.rollback()
     
     def add_stream(self, stream_name, rtsp_url, location, lat=None, lng=None, start_monitoring=True):
         """Add a new RTSP stream"""
@@ -313,7 +310,7 @@ class CCTVManager:
         self.save_streams_to_db()
         return True
     
-    def add_webcam_stream(self, stream_name="Live Webcam", location="Your Location", active=False):
+    def add_webcam_stream(self, stream_name="Live Webcam", location="Your Location", lat=None, lng=None, active=False):
         """Add webcam as a stream for testing"""
         # Cleanup existing stream if present
         self.stop_stream(stream_name)
@@ -326,13 +323,13 @@ class CCTVManager:
                     ret, _ = cap.read()
                     cap.release()
                     if ret:
-                        return self.add_stream(stream_name, "0", location, start_monitoring=True)
+                        return self.add_stream(stream_name, "0", location, lat=lat, lng=lng, start_monitoring=True)
             else:
                 # Add as disabled immediately
                 with self.lock:
                     self.blocked_streams.add(stream_name)
                     logger.info(f"Adding webcam {stream_name} as DISABLED (Blocked by default)")
-                return self.add_stream(stream_name, "0", location, start_monitoring=False)
+                return self.add_stream(stream_name, "0", location, lat=lat, lng=lng, start_monitoring=False)
             
             logger.error("Webcam not accessible or active=False check skipped")
             return False
@@ -340,35 +337,40 @@ class CCTVManager:
             logger.error(f"Error testing webcam: {e}")
             return False
 
-    def __init__(self, config=None):
+    def __init__(self, config=None, app=None):
         self.config = config
+        self.app = app # Store app for context in threads
         self.active_streams = {}
         self.stream_threads = {}
-        self.stream_readers = {} # New: Track readers for forced cleanup
-        self.blocked_streams = set() # New: Explicit block list (Kill Switch)
+        self.stream_readers = {} 
+        self.blocked_streams = set()
         self.latest_frames = {}
         self.latest_detections = {}
         self.lock = threading.Lock()
         self.running = True
+        self.last_detection_times = {}
         
         # Load configuration
         if self.config:
             self.lost_faces_dir = os.path.join(self.config.UPLOAD_FOLDER, 'persons')
             os.makedirs(self.lost_faces_dir, exist_ok=True)
         else:
-            # Fallback for direct instantiation without config (should not happen in app)
             base_dir = os.path.dirname(os.path.abspath(__file__))
             self.lost_faces_dir = os.path.join(base_dir, '..', 'data', 'uploads', 'persons')
             
+        # We need to load streams inside app context if possible, but __init__ might be called before app is fully ready?
+        # If called from app.py inside with app.app_context(), it's fine to call DB methods directly.
+        # But for correctness, we should use self.app.app_context() if self.app is provided.
+        
         self.load_streams_from_db()
 
         # Load lost persons for matching
         self.lost_face_encodings = []
         self.lost_face_names = []
-        self.load_lost_persons_database() # Assuming this is the correct method name
-        
-        # Detection throttling
-        self.last_detection_times = {} # Key: (stream_name, person_name), Value: timestamp
+        self.person_name_map = {} # Cache for display name resolution
+        self.load_lost_persons_database()
+
+
 
     def stop_stream(self, stream_name, remove_from_config=True):
         """Stop a specific stream monitoring"""
@@ -593,34 +595,34 @@ class CCTVManager:
                                 for match in matches:
                                     if match['found']:
                                         raw_name = match['name']
-                                        # Resolve display name for logging
-                                        display_name = raw_name
-                                        try:
-                                            from utils.helpers import load_persons_from_db
-                                            persons = load_persons_from_db(self.config.PERSONS_DB_FILE)
-                                            if raw_name in persons:
-                                                display_name = persons[raw_name].get('display_name', raw_name)
-                                        except: pass
+                                        # Resolve display name for logging using in-memory map
+                                        display_name = self.person_name_map.get(raw_name, raw_name)
 
                                         logger.info(f"🚨 FOUND: {display_name} ({raw_name}) in {stream_name} ({match['similarity']:.2f})")
+                                        
                                         try:
-                                            from utils.helpers import save_detection_to_db
                                             detection_key = (stream_name, raw_name)
                                             current_time = time.time()
                                             last_time = self.last_detection_times.get(detection_key, 0)
                                             
-                                            if current_time - last_time > 60:
-                                                if hasattr(self.config, 'DETECTIONS_DB_FILE'):
-                                                    record = {
-                                                        'person_name': raw_name, # Process ID for DB consistency
-                                                        'display_name': display_name, # Save display name for easier access (optional)
-                                                        'similarity': float(match['similarity']),
-                                                        'stream_name': stream_name,
-                                                        'timestamp': datetime.now().isoformat(),
-                                                        'location': stream_info.get('location', 'Unknown')
-                                                    }
-                                                    save_detection_to_db(record, self.config.DETECTIONS_DB_FILE)
-                                                    self.last_detection_times[detection_key] = current_time
+                                            if current_time - last_time > 5:
+                                                if self.app:
+                                                    try:
+                                                        with self.app.app_context():
+                                                            from models.db_models import Detection, db
+                                                            
+                                                            new_detection = Detection(
+                                                                person_name=raw_name,
+                                                                stream_name=stream_name,
+                                                                confidence=float(match['similarity']),
+                                                                timestamp=datetime.now()
+                                                            )
+                                                            db.session.add(new_detection)
+                                                            db.session.commit()
+                                                    except Exception as e:
+                                                        logger.error(f"Failed to save detection to DB: {e}")
+                                                        
+                                                self.last_detection_times[detection_key] = current_time
                                             else:
                                                 pass
                                         except: pass
@@ -708,34 +710,10 @@ class CCTVManager:
                 is_found = match.get('found', False)
                 
                 # Resolve display name for overlay
-                display_name = raw_name
+                # Resolve display name for overlay
+                display_name = self.person_name_map.get(raw_name, raw_name)
                 
-                # 1. Try DB Lookup
-                try:
-                    from utils.helpers import load_persons_from_db
-                    persons = load_persons_from_db(self.config.PERSONS_DB_FILE)
-                    
-                    found_in_db = False
-                    # Direct check failed? Try checking image_paths
-                    for p_id, p_data in persons.items():
-                        p_img_path = p_data.get('image_path', '')
-                        if not p_img_path: continue
-                        
-                        # Extract basename without extension
-                        p_filename = os.path.basename(p_img_path)
-                        p_stem = os.path.splitext(p_filename)[0]
-                        
-                        # Check complete match
-                        if p_stem == raw_name:
-                            display_name = p_data.get('display_name', p_data.get('name', raw_name))
-                            found_in_db = True
-                            break
-                            
-                    if not found_in_db:
-                         if raw_name in persons:
-                            display_name = persons[raw_name].get('display_name', raw_name)
-                            
-                except: pass
+                # 3. Fallback: Strip UUID if it looks like one (contains underscore)
                 
                 # 3. Fallback: Strip UUID if it looks like one (contains underscore)
                 if display_name == raw_name and '_' in display_name:
