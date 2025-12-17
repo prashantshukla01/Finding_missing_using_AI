@@ -1,0 +1,312 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Missing Person Detection System{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h2 class="mb-4"><i class="fas fa-tachometer-alt"></i> System Dashboard</h2>
+
+        <!-- Statistics Cards -->
+        <div class="row mb-4">
+            <div class="col-xl-3 col-md-6">
+                <div class="card stat-card mb-4">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <div class="text-muted text-uppercase fw-bold small">Persons</div>
+                        <div class="icon-shape bg-primary text-white rounded-circle shadow">
+                            <i class="fas fa-users"></i>
+                        </div>
+                    </div>
+                    <div class="d-flex align-items-center mb-2">
+                        <h2 class="mb-0 display-4 fw-bold" id="totalPersons">0</h2>
+                        <span class="ms-2 text-success small font-weight-bold">+ New</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-xl-3 col-md-6">
+                <div class="card stat-card mb-4 position-relative overflow-hidden">
+                    <div class="scan-line"></div>
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <div class="text-muted text-uppercase fw-bold small">Active Streams</div>
+                        <div class="icon-shape bg-success text-white rounded-circle shadow">
+                            <i class="fas fa-video"></i>
+                        </div>
+                    </div>
+                    <div class="d-flex align-items-center mb-2">
+                        <h2 class="mb-0 display-4 fw-bold" id="activeStreams">0</h2>
+                        <span class="ms-2 badge bg-success text-white blink">LIVE</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-xl-3 col-md-6">
+                <div class="card stat-card mb-4">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <div class="text-muted text-uppercase fw-bold small">Detections Today</div>
+                        <div class="icon-shape bg-warning text-white rounded-circle shadow">
+                            <i class="fas fa-bell"></i>
+                        </div>
+                    </div>
+                    <div class="d-flex align-items-center mb-2">
+                        <h2 class="mb-0 display-4 fw-bold" id="detectionsToday">0</h2>
+                        <span class="ms-2 text-warning small font-weight-bold"><i
+                                class="fas fa-exclamation-triangle"></i> Alerts</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-xl-3 col-md-6">
+                <div class="card stat-card mb-4">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <div class="text-muted text-uppercase fw-bold small">System Status</div>
+                        <div class="icon-shape bg-info text-white rounded-circle shadow">
+                            <i class="fas fa-heartbeat"></i>
+                        </div>
+                    </div>
+                    <div class="d-flex align-items-center mb-2">
+                        <h4 class="mb-0 fw-bold text-success" id="systemStatus">Operational</h4>
+                        <div class="heartbeat ms-auto"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <!-- Quick Actions -->
+            <div class="col-lg-6">
+                <div class="card mb-4">
+                    <div class="card-header border-0">
+                        <h5 class="card-title mb-0"><i class="fas fa-bolt text-warning me-2"></i> Quick Actions</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row g-4">
+                            <div class="col-md-6 col-lg-3">
+                                <a href="{{ url_for('person.upload_person_form') }}"
+                                    class="quick-action-card action-primary">
+                                    <i class="fas fa-user-plus"></i>
+                                    <span>Add Person</span>
+                                </a>
+                            </div>
+                            <div class="col-md-6 col-lg-3">
+                                <a href="{{ url_for('cctv.cctv_management') }}"
+                                    class="quick-action-card action-success">
+                                    <i class="fas fa-video"></i>
+                                    <span>Manage CCTV</span>
+                                </a>
+                            </div>
+                            <div class="col-md-6 col-lg-3">
+                                <a href="{{ url_for('person.list_persons') }}" class="quick-action-card action-info">
+                                    <i class="fas fa-users"></i>
+                                    <span>Database</span>
+                                </a>
+                            </div>
+                            <div class="col-md-6 col-lg-3">
+                                <div class="quick-action-card action-warning" onclick="quickSearch()"
+                                    style="cursor: pointer;">
+                                    <i class="fas fa-search"></i>
+                                    <span>Face Search</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- System Status -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0"><i class="fas fa-info-circle"></i> System Information</h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="systemInfo">
+                            <div class="spinner-border spinner-border-sm" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                            Loading system information...
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Recent Detections -->
+            <div class="col-lg-6">
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0"><i class="fas fa-bell"></i> Recent Detections</h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="recentDetections">
+                            <div class="text-center">
+                                <div class="spinner-border text-info" role="status">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
+                                <p class="mt-2 text-muted">Loading recent detections...</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Active Streams -->
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0"><i class="fas fa-video"></i> Active Streams</h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="activeStreamsList">
+                            <div class="text-center">
+                                <div class="spinner-border text-primary" role="status">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
+                                <p class="mt-2">Loading active streams...</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    async function loadDashboardData() {
+        try {
+            // Load system stats
+            const statsResponse = await fetch('/api/stats');
+            const stats = await statsResponse.json();
+
+            document.getElementById('totalPersons').textContent = stats.total_persons || 0;
+            document.getElementById('activeStreams').textContent = stats.active_streams || 0;
+            document.getElementById('detectionsToday').textContent = stats.detections_today || 0;
+            document.getElementById('systemStatus').textContent = stats.system_status || 'Unknown';
+
+            // Update System Info Panel
+            const systemInfoHtml = `
+                <ul class="list-unstyled mb-0">
+                    <li class="mb-2"><i class="fas fa-server w-25"></i> Status: <strong>${stats.system_status}</strong></li>
+                    <li class="mb-2"><i class="fas fa-id-card w-25"></i> Face Matcher: <strong>${stats.face_recognition}</strong></li>
+                    <li class="mb-2"><i class="fas fa-video w-25"></i> CCTV Monitoring: <strong>${stats.cctv_monitoring}</strong></li>
+                    <li class="mb-0"><i class="fas fa-clock w-25"></i> Server Time: ${new Date().toLocaleTimeString()}</li>
+                </ul>
+            `;
+            document.getElementById('systemInfo').innerHTML = systemInfoHtml;
+
+            // Load recent detections
+            const detectionsResponse = await fetch('/api/detections/recent');
+            const detections = await detectionsResponse.json();
+            displayRecentDetections(detections);
+
+            // Load active streams
+            const streamsResponse = await fetch('{{ url_for("cctv.get_streams") }}');
+            const streams = await streamsResponse.json();
+            displayActiveStreams(streams);
+
+        } catch (error) {
+            console.error('Error loading dashboard data:', error);
+        }
+    }
+
+    function displayRecentDetections(detections) {
+        const container = document.getElementById('recentDetections');
+
+        if (detections.length === 0) {
+            container.innerHTML = `
+                <div class="text-center text-muted py-4">
+                    <i class="fas fa-bell-slash fa-2x mb-2"></i>
+                    <p>No recent detections</p>
+                </div>
+            `;
+            return;
+        }
+
+        let html = '<div class="recent-detections-scroll pr-2">';
+        const recent = detections; // Show all returned (API limits to 50)
+
+        recent.forEach(detection => {
+            const time = new Date(detection.timestamp).toLocaleTimeString();
+            const confidence = (detection.confidence * 100).toFixed(1);
+
+            // Color code confidence
+            let badgeClass = 'bg-secondary';
+            if (detection.confidence > 0.8) badgeClass = 'bg-success';
+            else if (detection.confidence > 0.6) badgeClass = 'bg-info';
+            else badgeClass = 'bg-warning text-dark';
+
+            html += `
+                <div class="detection-item d-flex justify-content-between align-items-center border-bottom py-3 px-2">
+                    <div>
+                        <div class="d-flex align-items-center">
+                            <strong>${detection.person_name}</strong>
+                            <span class="badge ${badgeClass} ms-2" style="font-size: 0.7em;">${confidence}%</span>
+                        </div>
+                        <small class="text-muted">
+                            <i class="fas fa-video me-1"></i> ${detection.stream_name}
+                            <i class="fas fa-map-marker-alt ms-2 me-1"></i> ${detection.location || 'Unknown'}
+                        </small>
+                    </div>
+                    <div class="text-end">
+                        <small class="text-muted fw-bold">${time}</small>
+                    </div>
+                </div>
+            `;
+        });
+
+        html += '</div>';
+        container.innerHTML = html;
+    }
+
+    function displayActiveStreams(streams) {
+        const container = document.getElementById('activeStreamsList');
+        const activeStreams = Object.entries(streams).filter(([name, info]) => info.active);
+
+        if (activeStreams.length === 0) {
+            container.innerHTML = `
+                <div class="text-center text-muted py-4">
+                    <i class="fas fa-video-slash fa-2x mb-2"></i>
+                    <p>No active streams</p>
+                </div>
+            `;
+            return;
+        }
+
+        let html = '';
+        activeStreams.forEach(([name, info]) => {
+            html += `
+                <div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-2">
+                    <div>
+                        <strong>${name}</strong>
+                        <br>
+                        <small class="text-muted">${info.location}</small>
+                    </div>
+                    <div>
+                        <span class="badge bg-success">ONLINE</span>
+                    </div>
+                </div>
+            `;
+        });
+
+        container.innerHTML = html;
+    }
+
+    function quickSearch() {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*';
+        input.onchange = async (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                // Implement quick search functionality
+                alert('Quick search feature would open here with the selected image');
+            }
+        };
+        input.click();
+    }
+
+    // Load dashboard data on page load and refresh every 30 seconds
+    document.addEventListener('DOMContentLoaded', () => {
+        loadDashboardData();
+        setInterval(loadDashboardData, 30000);
+    });
+</script>
+{% endblock %}

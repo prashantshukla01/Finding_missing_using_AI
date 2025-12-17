@@ -1,0 +1,875 @@
+{% extends "base.html" %}
+
+{% block title %}CCTV Management - Missing Person Detection System{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2><i class="fas fa-video"></i> CCTV Management</h2>
+            <div class="col d-flex justify-content-end gap-2">
+                <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addStreamModal">
+                    <i class="fas fa-plus"></i> Add New Stream
+                </button>
+            </div>
+        </div>
+
+        <div class="row">
+            <!-- Streams List -->
+            <div class="col-md-4">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">CCTV Streams</h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="streamsList">
+                            <div class="text-center">
+                                <div class="spinner-border text-primary" role="status">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
+                                <p class="mt-2">Loading streams...</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Stream Viewer -->
+            <div class="col-md-8">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">Live Stream Viewer</h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="streamViewer">
+                            <div class="text-center p-5 stream-placeholder rounded border border-secondary"
+                                style="background: rgba(0,0,0,0.3);">
+                                <i class="fas fa-video-slash fa-3x text-secondary mb-3"></i>
+                                <h5 class="text-secondary">No Stream Selected</h5>
+                                <p class="text-muted">Select a stream from the list to view live footage</p>
+                            </div>
+                        </div>
+
+                        <div id="streamInfo" class="mt-3" style="display: none;">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <strong>Stream:</strong> <span id="currentStreamName">-</span><br>
+                                    <strong>Location:</strong> <span id="currentStreamLocation">-</span>
+                                </div>
+                                <div class="col-md-6">
+                                    <strong>Status:</strong> <span id="currentStreamStatus">-</span><br>
+                                    <strong>Last Update:</strong> <span id="currentStreamUpdate">-</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Recent Detections -->
+                <div class="card mt-4">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">
+                            <i class="fas fa-bell"></i> Recent Detections
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="detectionsList">
+                            <div class="text-center text-muted">
+                                <p>No recent detections</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Lost Persons Management -->
+                <div class="card mt-4">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">
+                            <i class="fas fa-user-times"></i> Missing Persons Database
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <button class="btn btn-primary btn-sm" onclick="showAddPersonModal()">
+                                    <i class="fas fa-plus"></i> Add Missing Person
+                                </button>
+                            </div>
+                            <div class="col-md-6 text-end">
+                                <small class="text-muted">Total: <span id="lostPersonsCount">0</span> persons</small>
+                            </div>
+                        </div>
+                        <div id="lostPersonsList" class="mt-3">
+                            <div class="text-center text-muted">
+                                <p>No missing persons in database</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Add Stream Modal -->
+<div class="modal fade" id="addStreamModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Add CCTV Stream</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="addStreamForm">
+                    <div class="mb-3">
+                        <label for="streamName" class="form-label">Stream Name *</label>
+                        <input type="text" class="form-control" id="streamName" required>
+                        <div class="form-text">Unique identifier for this stream</div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="rtspUrl" class="form-label">Stream URL (RTSP/RTMP) *</label>
+                        <input type="text" class="form-control" id="rtspUrl" required
+                            placeholder="rtsp://... or rtmp://...">
+                        <div class="form-text">
+                            Supports RTSP (rtsp://) and RTMP (rtmp://) protocols
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="streamLocation" class="form-label">Location *</label>
+                        <input type="text" class="form-control" id="streamLocation" required
+                            placeholder="e.g., Main Entrance, Parking Lot">
+                    </div>
+
+                    <div class="row">
+                        <div class="col-6 mb-3">
+                            <label for="streamLat" class="form-label">Latitude</label>
+                            <input type="number" step="any" class="form-control" id="streamLat"
+                                placeholder="e.g., 28.6139">
+                        </div>
+                        <div class="col-6 mb-3">
+                            <label for="streamLng" class="form-label">Longitude</label>
+                            <input type="number" step="any" class="form-control" id="streamLng"
+                                placeholder="e.g., 77.2090">
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <button type="button" class="btn btn-outline-primary btn-sm w-100 mb-2"
+                            onclick="useCurrentLocation()">
+                            <i class="fas fa-location-arrow"></i> Use My Current Location
+                        </button>
+                        <div id="pickerMap"></div>
+                        <div class="form-text text-center">Click on the map to set location or drag the marker</div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="addStream()">Add Stream</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Add Missing Person Modal -->
+<div class="modal fade" id="addPersonModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Add Missing Person</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="addPersonForm">
+                    <div class="mb-3">
+                        <label for="personName" class="form-label">Person Name *</label>
+                        <input type="text" class="form-control" id="personName" required>
+                        <div class="form-text">Enter the full name of the missing person</div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="personImage" class="form-label">Photo *</label>
+                        <input type="file" class="form-control" id="personImage" accept="image/*" required>
+                        <div class="form-text">Upload a clear photo with the person's face visible</div>
+                    </div>
+
+                    <div id="personPreview" class="mb-3" style="display: none;">
+                        <label class="form-label">Preview</label>
+                        <div class="text-center">
+                            <img id="personPreviewImg" class="img-thumbnail" style="max-height: 200px;">
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="addLostPerson()">Add Person</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+<style>
+    #pickerMap {
+        height: 300px;
+        width: 100%;
+        border-radius: 0.25rem;
+        border: 1px solid #ced4da;
+        margin-top: 10px;
+        cursor: crosshair;
+    }
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script>
+    let pickerMap;
+    let pickerMarker;
+
+    function initPickerMap() {
+        if (pickerMap) return; // Already initialized
+
+        // Default to Connaught Place, New Delhi if no location set
+        const defaultLat = 28.6315;
+        const defaultLng = 77.2167;
+
+        pickerMap = L.map('pickerMap').setView([defaultLat, defaultLng], 13);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(pickerMap);
+
+        // Click handler
+        pickerMap.on('click', function (e) {
+            updateLocationFromMap(e.latlng.lat, e.latlng.lng);
+        });
+    }
+
+    function updateLocationFromMap(lat, lng) {
+        // Update inputs
+        document.getElementById('streamLat').value = lat.toFixed(6);
+        document.getElementById('streamLng').value = lng.toFixed(6);
+
+        // Update marker
+        if (pickerMarker) {
+            pickerMarker.setLatLng([lat, lng]);
+        } else {
+            pickerMarker = L.marker([lat, lng], { draggable: true }).addTo(pickerMap);
+            // Drag handler
+            pickerMarker.on('dragend', function (e) {
+                const position = e.target.getLatLng();
+                document.getElementById('streamLat').value = position.lat.toFixed(6);
+                document.getElementById('streamLng').value = position.lng.toFixed(6);
+            });
+        }
+
+        pickerMap.setView([lat, lng], pickerMap.getZoom());
+    }
+
+    function useCurrentLocation() {
+        const btn = document.querySelector('button[onclick="useCurrentLocation()"]');
+        const originalText = btn.innerHTML;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Locating...';
+        btn.disabled = true;
+
+        if (!navigator.geolocation) {
+            alert("Geolocation is not supported by your browser");
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+            return;
+        }
+
+        navigator.geolocation.getCurrentPosition(
+            (position) => {
+                const lat = position.coords.latitude;
+                const lng = position.coords.longitude;
+
+                // Update map and inputs
+                if (!pickerMap) initPickerMap();
+                updateLocationFromMap(lat, lng);
+
+                // Also try to reverse geocode to get address for "Location" field
+                // Simple placeholder for now, user can edit
+                const locInput = document.getElementById('streamLocation');
+                if (!locInput.value) {
+                    locInput.value = "My Current Location";
+                }
+
+                btn.innerHTML = '<i class="fas fa-check"></i> Found';
+                setTimeout(() => {
+                    btn.innerHTML = originalText;
+                    btn.disabled = false;
+                }, 2000);
+            },
+            (error) => {
+                console.error("Error getting location:", error);
+                alert("Unable to retrieve your location. Please check browser permissions.");
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+            }
+        );
+    }
+
+    class CCTVManagerUI {
+        constructor() {
+            this.currentStream = null;
+            this.streamInterval = null;
+            this.loadStreams();
+            this.loadRecentDetections();
+
+            // Refresh streams every 10 seconds
+            setInterval(() => {
+                if (!document.hidden) this.loadStreams();
+            }, 10000);
+
+            // Refresh detections every 15 seconds
+            setInterval(() => {
+                if (!document.hidden) this.loadRecentDetections();
+            }, 15000);
+        }
+
+        async loadStreams() {
+            try {
+                const response = await fetch('{{ url_for("cctv.get_streams") }}');
+                const streams = await response.json();
+                this.displayStreams(streams);
+            } catch (error) {
+                console.error('Error loading streams:', error);
+                document.getElementById('streamsList').innerHTML = `
+                    <div class="alert alert-danger">
+                        Failed to load streams: ${error.message}
+                    </div>
+                `;
+            }
+        }
+
+        displayStreams(streams) {
+            const streamsList = document.getElementById('streamsList');
+
+            if (Object.keys(streams).length === 0) {
+                streamsList.innerHTML = `
+                    <div class="text-center text-muted">
+                        <i class="fas fa-video-slash fa-2x mb-2"></i>
+                        <p>No streams configured</p>
+                    </div>
+                `;
+                return;
+            }
+
+            let html = '';
+            Object.entries(streams).forEach(([name, info]) => {
+                const isCurrent = this.currentStream === name;
+                const lastUpdate = info.last_update ? new Date(info.last_update).toLocaleTimeString() : 'Never';
+                let statusClass = 'secondary';
+                let statusText = 'OFFLINE';
+
+                if (info.active) {
+                    if (info.status === 'online') {
+                        statusClass = 'success';
+                        statusText = 'ONLINE';
+                    } else if (info.status === 'connecting') {
+                        statusClass = 'warning';
+                        statusText = 'CONNECTING';
+                    } else {
+                        statusClass = 'danger';
+                        statusText = 'ERROR';
+                    }
+                }
+
+                html += `
+                    <div class="stream-item card mb-2 ${isCurrent ? 'border-primary' : ''}" style="cursor: pointer;">
+                        <div class="card-body py-2">
+                            <div class="d-flex justify-content-between align-items-start">
+                                <div onclick="cctvUI.selectStream('${name}')">
+                                    <h6 class="mb-1">${name}</h6>
+                                    <small class="text-muted">${info.location}</small>
+                                </div>
+                                <div class="text-end">
+                                    <div class="form-check form-switch d-inline-block">
+                                        <input class="form-check-input" type="checkbox" id="toggle-${name}" 
+                                               ${info.active ? 'checked' : ''} 
+                                               onchange="cctvUI.toggleStream('${name}', this.checked)">
+                                    </div>
+                                    <br>
+                                    <span class="badge bg-${statusClass}">
+                                        ${statusText}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+
+            streamsList.innerHTML = html;
+        }
+
+        selectStream(streamName) {
+            this.currentStream = streamName;
+            this.loadStreams(); // Reload to update active state
+            this.startStreamViewer(streamName);
+        }
+
+        startStreamViewer(streamName) {
+            // Clear previous interval
+            if (this.streamInterval) {
+                clearInterval(this.streamInterval);
+            }
+
+            // Update stream info
+            this.updateStreamInfo(streamName);
+
+            // Start MJPEG stream
+            this.startMJPEGStream(streamName);
+
+            // Keep updating stream info periodically
+            this.streamInterval = setInterval(() => {
+                if (!document.hidden) this.updateStreamInfo(streamName);
+            }, 2000);
+        }
+
+        startMJPEGStream(streamName) {
+            const viewer = document.getElementById('streamViewer');
+            const encodedStreamName = encodeURIComponent(streamName);
+            const streamUrl = `/api/cctv/stream/${encodedStreamName}`;
+
+            viewer.innerHTML = `
+                <div class="position-relative">
+                    <img id="liveStreamImg" 
+                         src="${streamUrl}" 
+                         class="img-fluid rounded" 
+                         alt="Live Stream"
+                         style="max-width: 100%; height: auto;"
+                         onerror="this.onerror=null; this.src='/static/images/stream-error.svg'; document.getElementById('streamViewer').innerHTML = '<div class=\'text-center p-5 bg-danger text-white rounded\'><i class=\'fas fa-exclamation-triangle fa-2x mb-3\'></i><h5>Stream Error</h5><p>Failed to connect to stream</p><button class=\'btn btn-light btn-sm mt-2\' onclick=\'cctvUI.retryStream(\&quot;' + '${streamName}' + '\&quot;)\'><i class=\'fas fa-redo\'></i> Retry</button></div>';">
+                    <div class="position-absolute top-0 end-0 bg-dark text-white px-2 py-1 m-2 rounded">
+                        <i class="fas fa-circle text-success"></i> LIVE MJPEG
+                    </div>
+                    <div class="position-absolute bottom-0 start-0 bg-dark text-white px-2 py-1 m-2 rounded">
+                        ${new Date().toLocaleTimeString()}
+                    </div>
+                </div>
+            `;
+        }
+
+        async updateStreamInfo(streamName) {
+            const streams = await (await fetch('{{ url_for("cctv.get_streams") }}')).json();
+            const streamInfo = streams[streamName];
+
+            if (streamInfo) {
+                document.getElementById('streamInfo').style.display = 'block';
+                document.getElementById('currentStreamName').textContent = streamName;
+                document.getElementById('currentStreamLocation').textContent = streamInfo.location;
+                document.getElementById('currentStreamStatus').innerHTML = `
+                    <span class="badge bg-${streamInfo.active ? 'success' : 'danger'}">
+                        ${streamInfo.active ? 'ONLINE' : 'OFFLINE'}
+                    </span>
+                `;
+                document.getElementById('currentStreamUpdate').textContent =
+                    streamInfo.last_update ? new Date(streamInfo.last_update).toLocaleString() : 'Never';
+            }
+        }
+
+        retryStream(streamName) {
+            this.startMJPEGStream(streamName);
+        }
+
+        async updateStreamFrame(streamName) {
+            // This method is now used only as fallback or for testing
+            // The main streaming is handled by MJPEG
+            try {
+                const frameUrl = `/api/cctv/stream/${encodeURIComponent(streamName)}/frame?${Date.now()}`;
+                const existingImg = document.querySelector('#streamViewer img');
+                const viewer = document.getElementById('streamViewer');
+
+                // If image already exists, just update its src (no DOM flicker)
+                if (existingImg) {
+                    existingImg.src = frameUrl;
+                } else {
+                    // Initial render: create the image element
+                    viewer.innerHTML = `
+                        <div class="position-relative">
+                            <img id="liveStreamImg" 
+                                 src="${frameUrl}" 
+                                 class="img-fluid rounded" 
+                                 alt="Live Stream"
+                                 style="max-width: 100%; height: auto;">
+                            <div class="position-absolute top-0 end-0 bg-dark text-white px-2 py-1 m-2 rounded">
+                                <i class="fas fa-circle text-success"></i> LIVE
+                            </div>
+                            <div class="position-absolute bottom-0 start-0 bg-dark text-white px-2 py-1 m-2 rounded">
+                                ${new Date().toLocaleTimeString()}
+                            </div>
+                        </div>
+                    `;
+                }
+
+                // Smoothly update time overlay too
+                const timeOverlay = viewer.querySelector('.position-absolute.bottom-0.start-0');
+                if (timeOverlay) timeOverlay.textContent = new Date().toLocaleTimeString();
+
+                // Update stream info once every cycle
+                this.updateStreamInfo(streamName);
+
+            } catch (error) {
+                console.error('Error updating stream frame:', error);
+                const viewer = document.getElementById('streamViewer');
+                viewer.innerHTML = `
+                    <div class="text-center p-5 bg-danger text-white rounded">
+                        <i class="fas fa-exclamation-triangle fa-2x mb-3"></i>
+                        <h5>Connection Error</h5>
+                        <p>Failed to connect to stream</p>
+                        <button class="btn btn-light btn-sm mt-2" onclick="cctvUI.retryStream('${streamName}')">
+                            <i class="fas fa-redo"></i> Retry
+                        </button>
+                    </div>
+                `;
+            }
+        }
+
+
+
+        async loadRecentDetections() {
+            try {
+                const response = await fetch('{{ url_for("api.get_recent_detections") }}');
+                const detections = await response.json();
+                this.showDetections(detections);
+            } catch (error) {
+                console.error('Error loading detections:', error);
+            }
+        }
+
+        showDetections(detections) {
+            const detectionsList = document.getElementById('detectionsList');
+
+            if (detections.length === 0) {
+                detectionsList.innerHTML = `
+                    <div class="text-center text-muted">
+                        <p>No recent detections</p>
+                    </div>
+                `;
+                return;
+            }
+
+            // Show only last 5 detections
+            const recentDetections = detections.slice(-5).reverse();
+
+            let html = '';
+            recentDetections.forEach(detection => {
+                const time = new Date(detection.timestamp).toLocaleString();
+                const confidencePercent = (detection.confidence * 100).toFixed(1);
+
+                html += `
+                    <div class="alert alert-warning detection-alert mb-2">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <div>
+                                <strong>${detection.person_name}</strong><br>
+                                <small>Location: ${detection.stream_name}</small><br>
+                                <small>Confidence: ${confidencePercent}%</small>
+                            </div>
+                            <div class="text-end">
+                                <small>${time}</small>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+
+            detectionsList.innerHTML = html;
+        }
+
+        async stopWebcam() {
+            const btn = document.querySelector('button[onclick="cctvUI.stopWebcam()"]');
+            const originalText = btn ? btn.innerHTML : 'Stop Webcam';
+            if (btn) {
+                btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Stopping...';
+                btn.disabled = true;
+            }
+
+            try {
+                // Find the stream named "Live Webcam"
+                const toggleElement = document.getElementById('toggle-Live Webcam');
+                // Force UI off immediately
+                if (toggleElement) toggleElement.checked = false;
+
+                // Call API
+                const response = await fetch('/cctv/toggle/Live%20Webcam', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ active: false })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    if (this.currentStream === 'Live Webcam') {
+                        document.getElementById('streamViewer').innerHTML = `
+                            <div class="text-center p-5">
+                                <i class="fas fa-video-slash fa-3x mb-3 text-muted"></i>
+                                <h5>No Stream Selected</h5>
+                                <p class="text-muted">Webcam stopped successfully</p>
+                            </div>
+                        `;
+                        this.currentStream = null;
+                        if (this.streamInterval) clearInterval(this.streamInterval);
+                    }
+                    this.loadStreams();
+                    // Optional: Brief success indicator on button
+                    if (btn) btn.innerHTML = '<i class="fas fa-check"></i> Stopped';
+                } else {
+                    alert('Error stopping webcam: ' + result.error);
+                }
+            } catch (e) {
+                console.error(e);
+                alert("Failed to stop webcam: " + e.message);
+            } finally {
+                // Restore button after delay
+                setTimeout(() => {
+                    if (btn) {
+                        btn.innerHTML = originalText;
+                        btn.disabled = false;
+                    }
+                }, 2000);
+            }
+        }
+
+        async toggleStream(streamName, active) {
+            try {
+                // Prevent bubbling if clicking switch also triggers selectStream
+                if (window.event) window.event.stopPropagation();
+
+                const response = await fetch(`/cctv/toggle/${encodeURIComponent(streamName)}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ active })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    if (active) {
+                        // If turning ON, auto-select it
+                        this.selectStream(streamName);
+                    } else {
+                        // If turning OFF
+                        if (this.currentStream === streamName) {
+                            if (this.streamInterval) clearInterval(this.streamInterval);
+                            this.currentStream = null;
+
+                            document.getElementById('streamViewer').innerHTML = `
+                                <div class="text-center p-5">
+                                    <i class="fas fa-video-slash fa-3x mb-3 text-muted"></i>
+                                    <h5>No Stream Selected</h5>
+                                    <p class="text-muted">Select a stream from the list to view live footage</p>
+                                </div>
+                            `;
+                        }
+                        this.loadStreams(); // Refresh list to show disabled status
+                    }
+                } else {
+                    alert('Error toggling stream: ' + result.error);
+                    document.getElementById(`toggle-${streamName}`).checked = !active;
+                }
+            } catch (error) {
+                console.error('Error toggling stream:', error);
+                alert('Failed to toggle stream');
+                document.getElementById(`toggle-${streamName}`).checked = !active;
+            }
+        }
+    }
+
+
+    // Global function to add stream
+    async function addStream() {
+        const name = document.getElementById('streamName').value.trim();
+        const url = document.getElementById('rtspUrl').value.trim();
+        const location = document.getElementById('streamLocation').value.trim();
+        const lat = document.getElementById('streamLat').value.trim();
+        const lng = document.getElementById('streamLng').value.trim();
+
+        if (!name || !url || !location) {
+            alert('Please fill all required fields');
+            return;
+        }
+
+        try {
+            const response = await fetch('{{ url_for("cctv.add_cctv_stream") }}', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, url, location, lat, lng })
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                alert('Stream added successfully!');
+                document.getElementById('addStreamForm').reset();
+                bootstrap.Modal.getInstance(document.getElementById('addStreamModal')).hide();
+                cctvUI.loadStreams();
+            } else {
+                alert('Error: ' + result.error);
+            }
+        } catch (error) {
+            alert('Failed to add stream: ' + error.message);
+        }
+    }
+
+    // Initialize CCTV UI
+    // Initialize
+    document.addEventListener('DOMContentLoaded', () => {
+        window.cctvUI = new CCTVManagerUI();
+        loadLostPersons();
+        setupPersonImagePreview();
+
+        // Initialize map when modal is shown
+        const msgModal = document.getElementById('addStreamModal');
+        msgModal.addEventListener('shown.bs.modal', function () {
+            if (!pickerMap) {
+                initPickerMap();
+            }
+            pickerMap.invalidateSize();
+        });
+    });
+
+    // Missing Persons Management Functions
+    function showAddPersonModal() {
+        const modal = new bootstrap.Modal(document.getElementById('addPersonModal'));
+        modal.show();
+    }
+
+    function setupPersonImagePreview() {
+        const fileInput = document.getElementById('personImage');
+        const preview = document.getElementById('personPreview');
+        const previewImg = document.getElementById('personPreviewImg');
+
+        fileInput.addEventListener('change', function (e) {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function (e) {
+                    previewImg.src = e.target.result;
+                    preview.style.display = 'block';
+                };
+                reader.readAsDataURL(file);
+            } else {
+                preview.style.display = 'none';
+            }
+        });
+    }
+
+    async function addLostPerson() {
+        const name = document.getElementById('personName').value.trim();
+        const fileInput = document.getElementById('personImage');
+        const file = fileInput.files[0];
+
+        if (!name || !file) {
+            alert('Please provide both name and photo');
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append('name', name);
+        formData.append('age', ''); // Optional field
+        formData.append('last_seen_location', 'Unknown'); // Default location
+        formData.append('last_seen_time', new Date().toISOString().slice(0, 16)); // Current time
+        formData.append('description', 'Added from CCTV Management'); // Default description
+        formData.append('contact_info', ''); // Optional field
+        formData.append('additional_notes', ''); // Optional field
+        formData.append('image', file);
+
+        try {
+            const response = await fetch('{{ url_for("person.upload_person") }}', {
+                method: 'POST',
+                body: formData
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                alert('Missing person added successfully!');
+                document.getElementById('addPersonForm').reset();
+                document.getElementById('personPreview').style.display = 'none';
+                bootstrap.Modal.getInstance(document.getElementById('addPersonModal')).hide();
+                loadLostPersons();
+            } else {
+                alert('Error: ' + result.error);
+            }
+        } catch (error) {
+            alert('Failed to add missing person: ' + error.message);
+        }
+    }
+
+    async function loadLostPersons() {
+        try {
+            const lostPersonsList = document.getElementById('lostPersonsList');
+            const countElement = document.getElementById('lostPersonsCount');
+
+            // Call the API to get persons
+            const response = await fetch('{{ url_for("api.get_persons") }}');
+            const persons = await response.json();
+
+            const personCount = Object.keys(persons).length;
+            countElement.textContent = personCount;
+
+            if (personCount === 0) {
+                lostPersonsList.innerHTML = `
+                    <div class="text-center text-muted">
+                        <p>No persons in database</p>
+                        <small>Persons will appear here when added</small>
+                    </div>
+                `;
+                return;
+            }
+
+            // Display persons
+            let html = '';
+            Object.entries(persons).forEach(([personId, person]) => {
+                html += `
+                    <div class="card mb-2">
+                        <div class="card-body py-2">
+                            <div class="row align-items-center">
+                                <div class="col-auto">
+                                    <img src="${person.image_path}" 
+                                         alt="${person.name}" 
+                                         class="rounded-circle" 
+                                         style="width: 40px; height: 40px; object-fit: cover;">
+                                </div>
+                                <div class="col">
+                                    <h6 class="mb-0">${person.display_name || person.name}</h6>
+                                    <small class="text-muted">${person.description || 'No description'}</small>
+                                </div>
+                                <div class="col-auto text-end">
+                                    <small class="text-muted">ID: ${personId.substring(0, 8)}</small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+
+            lostPersonsList.innerHTML = html;
+
+        } catch (error) {
+            console.error('Error loading lost persons:', error);
+            const lostPersonsList = document.getElementById('lostPersonsList');
+            lostPersonsList.innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="fas fa-exclamation-triangle"></i> Error loading persons: ${error.message}
+                </div>
+            `;
+        }
+    }
+
+    // Initialize
+    document.addEventListener('DOMContentLoaded', () => {
+        window.cctvUI = new CCTVManagerUI();
+        loadLostPersons();
+    });
+</script>
+{% endblock %}
