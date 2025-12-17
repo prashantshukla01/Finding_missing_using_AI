@@ -1,4 +1,4 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, Response
 import logging
 from datetime import datetime, timedelta
 from app.models.db_models import db, Person, Detection, Stream
@@ -206,3 +206,15 @@ def get_system_stats():
             'total_persons': 0, 'total_streams': 0, 'detections_today': 0, 
             'error': str(e)
         })
+
+@api_bp.route('/cctv/stream/<stream_name>')
+def stream_video(stream_name):
+    """Video streaming route for specific stream"""
+    try:
+        return Response(
+            cctv_manager.get_frame_generator(stream_name),
+            mimetype='multipart/x-mixed-replace; boundary=frame'
+        )
+    except Exception as e:
+        logger.error(f"Stream error: {e}")
+        return "Stream Error", 500

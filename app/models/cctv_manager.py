@@ -43,18 +43,42 @@ class StreamReader:
         
     def _update(self):
         while self.running:
-            if self.cap.isOpened():
+            if self.cap and self.cap.isOpened():
                 ret, frame = self.cap.read()
                 if ret:
                     self.q.append(frame)
                     with self.lock: self.status = 'online'
                 else:
-                    with self.lock: self.status = 'error'
-                    # Try to reconnect? For now just wait a bit to avoid spin loop
-                    time.sleep(0.1)
+                    # If reading fails for a normal stream, it's an error
+                    if str(self.url).lower() in ['demo', 'webcam']:
+                        # Fallback for demo: Generate synthetic noise
+                        synthetic_frame = np.random.randint(0, 255, (480, 640, 3), dtype=np.uint8)
+                        cv2.putText(synthetic_frame, "DEMO MODE (No Camera)", (150, 240), 
+                                   cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+                        # Add timestamp
+                        time_str = datetime.now().strftime("%H:%M:%S")
+                        cv2.putText(synthetic_frame, time_str, (500, 450), 
+                                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                        
+                        self.q.append(synthetic_frame)
+                        with self.lock: self.status = 'online'
+                        time.sleep(0.1) # Simulate FPS
+                    else:
+                        with self.lock: self.status = 'error'
+                        time.sleep(0.1)
             else:
-                with self.lock: self.status = 'error'
-                time.sleep(1)
+                # If capture not opened
+                if str(self.url).lower() in ['demo', 'webcam']:
+                     # Synthetic fallback immediately
+                     with self.lock: self.status = 'online'
+                     synthetic_frame = np.zeros((480, 640, 3), dtype=np.uint8)
+                     cv2.putText(synthetic_frame, "NO WEBCAM FOUND", (180, 240), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+                     self.q.append(synthetic_frame)
+                     time.sleep(1)
+                else:
+                    with self.lock: self.status = 'error'
+                    time.sleep(1)
                 
     def read(self):
         try:
@@ -77,303 +101,171 @@ class StreamReader:
         gc.collect()
         
     def isOpened(self):
-        return self.cap.isOpened()
+        if self.cap and self.cap.isOpened():
+            return True
+        # Critical Fallback: Enable synthetic frames if hardware cam fails
+        # Usage: digits (0, 1) or 'demo'/'webcam' keywords
+        if str(self.url).lower() in ['demo', 'webcam', 'camera'] or str(self.url).isdigit():
+            return True
+        return False
         
     def reconnect(self):
         self.cap.release()
         self.cap = cv2.VideoCapture(self.url)
 
 class CCTVManager:
-    def __init__(self, config, app=None):
+    def __init__(self, config=None, app=None):
         self.config = config
         self.app = app
         self.active_streams = {}
-        # Stores the latest frame for each stream: {stream_name: frame}
         self.latest_frames = {}
-        # Lock for thread-safe access to active_streams and latest_frames
+        self.latest_detections = {}
         self.lock = threading.Lock()
         
         self.person_name_map = {}
         
         self.stream_readers = {}
-        self.running = True  # Global running flag
-        self.latest_detections = {} # Cache for background detections
-        self.last_detection_times = {} # Check for duplicate detections: {(stream_name, person_name): timestamp}
+        self.stream_threads = {}
+        self.blocked_streams = set()
+        self.running = True
+        self.last_detection_times = {} 
         
         # Lost persons database
-        self.lost_face_encodings = []
-        self.lost_face_names = []
-        self.lost_faces_dir = "data/lost_faces"
-        
-        # Load existing streams from database
-        self.load_streams_from_db()
-        
-        # Load lost persons database
-        self.load_lost_persons_database()
-        
-        logger.info("CCTV Manager initialized successfully")
-    
-    def load_lost_persons_database(self):
-        """Load and encode all lost persons from the SQLite database"""
-        try:
-            from app.models.db_models import Person, db
-            
-            with self.lock:
-                self.lost_face_encodings = []
-                self.lost_face_names = []
-            
-            persons = Person.query.all()
-            logger.info(f"Loading {len(persons)} persons from database")
-            
-            count = 0
-            for person in persons:
-                if person.embedding:
-                    if isinstance(person.embedding, dict) and 'insightface' in person.embedding:
-                        self.lost_face_encodings.append(person.embedding['insightface'])
-                    else:
-                        # Handle case where it might already be a list or direct embedding
-                        self.lost_face_encodings.append(person.embedding)
-                        
-                    self.lost_face_names.append(person.name)
-                    self.person_name_map[person.name] = person.display_name or person.name
-                    count += 1
-                elif person.image_path and os.path.exists(person.image_path) and hasattr(self.config, 'face_matcher'):
-                     # Fallback: Generate embedding if missing in DB but have image
-                     logger.info(f"Generating missing embedding for {person.name}")
-                     embedding_data = self.config.face_matcher.extract_embeddings(person.image_path)
-                     if embedding_data:
-                         person.embedding = embedding_data
-                         self.lost_face_encodings.append(embedding_data['insightface'])
-                         self.lost_face_names.append(person.name)
-                         count += 1
-            
-            # Commit any new embeddings generated
-            if hasattr(self.config, 'face_matcher'):
-                try:
-                    db.session.commit()
-                except:
-                    db.session.rollback()
-            
-            logger.info(f"✅ Loaded {count} lost persons into memory")
-            
-        except Exception as e:
-            logger.error(f"❌ Error loading lost persons database: {e}")
-    
-    def reload_lost_persons_database(self):
-        """Reload lost persons database after face_matcher is available"""
-        self.load_lost_persons_database()
-    
-    def add_lost_person(self, image_path, person_name, display_name=None):
-        """Add a new lost person to the database using insightface"""
-        try:
-            if display_name is None:
-                display_name = person_name
-
-            # Copy image to lost faces directory
-            filename = f"{person_name}.jpg"
-            destination = os.path.join(self.lost_faces_dir, filename)
-            
-            # Read and save the image
-            image = cv2.imread(image_path)
-            if image is None:
-                logger.error(f"❌ Could not load image from {image_path}")
-                return False
-            
-            cv2.imwrite(destination, image)
-            
-            # Use insightface to extract embeddings directly
-            embedding_data = self.config.face_matcher.extract_embeddings(destination)
-            
-            if embedding_data is not None:
-                # Validate face quality
-                is_valid, message = self.config.face_matcher.validate_face_quality(embedding_data)
-                
-                if is_valid:
-                    with self.lock:
-                        self.lost_face_encodings.append(embedding_data['insightface'])
-                        self.lost_face_names.append(person_name)
-                    
-                    # Save to database
-                    from app.models.db_models import Person, db
-                    from datetime import datetime
-                    
-                    new_person = Person(
-                        id=person_name, # Using filename UUID as ID for consistency
-                        name=person_name,
-                        display_name=display_name,
-                        image_path=destination,
-                        embedding=embedding_data,
-                        description='Added via API',
-                        last_seen_location='Unknown',
-                        last_seen_time=datetime.now().isoformat(),
-                        created_at=datetime.utcnow()
-                    )
-                    
-                    db.session.add(new_person)
-                    db.session.commit()
-                    logger.info(f"✅ Added new lost person: {person_name}")
-                    return True
-                else:
-                    logger.warning(f"⚠️ Face quality check failed for {person_name}: {message}")
-                    return False
-            else:
-                logger.warning(f"⚠️ No face found in uploaded image for {person_name}")
-                return False
-                
-        except Exception as e:
-            logger.error(f"❌ Error adding lost person {person_name}: {e}")
-            return False
-    
-    def load_streams_from_db(self):
-        """Load CCTV streams from SQLite database"""
-        try:
-            from app.models.db_models import Stream
-            
-            streams = Stream.query.all()
-            
-            for stream in streams:
-                # Force all streams to start as INACTIVE/OFFLINE by default as requested
-                self.add_stream(
-                    stream.name,
-                    stream.source_url,
-                    stream.location,
-                    lat=stream.lat,
-                    lng=stream.lng,
-                    start_monitoring=False # User requested all toggles off by default
-                )
-                
-            logger.info(f"Loaded {len(streams)} streams from database (Started as INACTIVE)")
-        except Exception as e:
-            logger.error(f"Error loading CCTV database: {e}")
-    
-    def save_streams_to_db(self):
-        """Save CCTV streams to SQLite database"""
-        try:
-            from app.models.db_models import Stream, db
-            
-            with self.lock:
-                current_streams = self.active_streams.copy()
-            
-            for name, info in current_streams.items():
-                stream = Stream.query.filter_by(name=name).first()
-                if stream:
-                    stream.source_url = info['url']
-                    stream.location = info['location']
-                    stream.lat = info.get('lat')
-                    stream.lng = info.get('lng')
-                    stream.active = info.get('active', False)
-                else:
-                    new_stream = Stream(
-                        name=name,
-                        source_url=info['url'],
-                        location=info['location'],
-                        lat=info.get('lat'),
-                        lng=info.get('lng'),
-                        active=info.get('active', False)
-                    )
-                    db.session.add(new_stream)
-            
-            db.session.commit()
-                
-        except Exception as e:
-            logger.error(f"Error saving CCTV streams to DB: {e}")
-            db.session.rollback()
-    
-    def add_stream(self, stream_name, rtsp_url, location, lat=None, lng=None, start_monitoring=True):
-        """Add a new RTSP stream"""
-        logger.info(f"Adding stream: {stream_name}")
-        
-        with self.lock:
-            # Check if exists and looks active
-            # Check if exists
-            if stream_name in self.active_streams:
-                logger.info(f"Stream {stream_name} already exists. Updating configuration...")
-                # Mark old stream as inactive to stop its thread
-                self.active_streams[stream_name]['active'] = False
-                # Brief pause to allow thread to notice? ideally not needed if we overwrite active_streams entry next
-                # But to be safe we can just let it be overwritten, the old thread has a local ref to the old dict output
-                # The old dict's 'active' key is now False, so the thread will exit loop.
-                pass
-
-            self.active_streams[stream_name] = {
-                'url': rtsp_url,
-                'location': location,
-                'lat': lat,
-                'lng': lng,
-                'active': start_monitoring,
-            'status': 'disabled' if not start_monitoring else 'connecting',
-                'last_update': datetime.now(),
-                'added_date': datetime.now().isoformat(),
-                'error_count': 0
-            }
-        
-        if start_monitoring:
-            self.start_stream_monitoring(stream_name)
-        
-        self.save_streams_to_db()
-        return True
-    
-    def add_webcam_stream(self, stream_name="Live Webcam", location="Your Location", lat=None, lng=None, active=False):
-        """Add webcam as a stream for testing"""
-        # Cleanup existing stream if present
-        self.stop_stream(stream_name)
-        
-        # Test if webcam is available
-        try:
-            if active:
-                cap = cv2.VideoCapture(0)
-                if cap.isOpened():
-                    ret, _ = cap.read()
-                    cap.release()
-                    if ret:
-                        return self.add_stream(stream_name, "0", location, lat=lat, lng=lng, start_monitoring=True)
-            else:
-                # Add as disabled immediately
-                with self.lock:
-                    self.blocked_streams.add(stream_name)
-                    logger.info(f"Adding webcam {stream_name} as DISABLED (Blocked by default)")
-                return self.add_stream(stream_name, "0", location, lat=lat, lng=lng, start_monitoring=False)
-            
-            logger.error("Webcam not accessible or active=False check skipped")
-            return False
-        except Exception as e:
-            logger.error(f"Error testing webcam: {e}")
-            return False
-
-    def __init__(self, config=None, app=None):
-        self.config = config
-        self.app = app # Store app for context in threads
-        self.active_streams = {}
-        self.stream_threads = {}
-        self.stream_readers = {} 
-        self.blocked_streams = set()
-        self.latest_frames = {}
-        self.latest_detections = {}
-        self.lock = threading.Lock()
-        self.running = True
-        self.last_detection_times = {}
-        
-        # Load configuration
         if self.config:
             self.lost_faces_dir = os.path.join(self.config.UPLOAD_FOLDER, 'persons')
-            os.makedirs(self.lost_faces_dir, exist_ok=True)
         else:
             base_dir = os.path.dirname(os.path.abspath(__file__))
             self.lost_faces_dir = os.path.join(base_dir, '..', 'data', 'uploads', 'persons')
-            
-        # We need to load streams inside app context if possible, but __init__ might be called before app is fully ready?
-        # If called from app.py inside with app.app_context(), it's fine to call DB methods directly.
-        # But for correctness, we should use self.app.app_context() if self.app is provided.
         
-        self.load_streams_from_db()
-
-        # Load lost persons for matching
+        os.makedirs(self.lost_faces_dir, exist_ok=True)
+        
         self.lost_face_encodings = []
         self.lost_face_names = []
-        self.person_name_map = {} # Cache for display name resolution
-        self.load_lost_persons_database()
+        
+        # Initialize
+        self.load_streams_from_db()
+        # Initialize
+        self.load_streams_from_db()
+        self.reload_lost_persons_database()
+        
+        logger.info("CCTV Manager initialized successfully")
+        
+        logger.info("CCTV Manager initialized successfully")
 
+    def load_streams_from_db(self):
+        """Load streams from database on initialization"""
+        try:
+            # Ensure we're in app context
+            if self.app:
+                with self.app.app_context():
+                    from app.models.db_models import Stream
+                    streams = Stream.query.all()
+                    
+                    for stream in streams:
+                        # POLICY: Webcams must start OFF by default for privacy/battery
+                        # Check digits OR keywords
+                        src_lower = str(stream.source_url).lower()
+                        is_webcam = src_lower.isdigit() or src_lower in ['demo', 'webcam', 'camera']
+                        
+                        # FORCE OFF for webcams on startup, regardless of DB state
+                        if is_webcam:
+                            initial_active = False 
+                            if stream.active:
+                                logger.info(f"🔒 Security: Forcing stream '{stream.name}' OFF on startup.")
+                                stream.active = False
+                                db.session.commit()
+                        else:
+                            initial_active = stream.active
+                        
+                        # Initialize active_streams dictionary entry first
+                        self.active_streams[stream.name] = {
+                            'name': stream.name,
+                            'url': stream.source_url,
+                            'status': 'offline', # Start offline, let monitor set it
+                            'active': initial_active,
+                            'location': stream.location # Add location for UI
+                        }
+                        
+                        if initial_active:
+                            logger.info(f"Starting stream from DB: {stream.name}")
+                            # Correct way: use start_stream_monitoring
+                            self.start_stream_monitoring(stream.name)
+                        else:
+                            status_msg = "Force-Disabled Webcam" if is_webcam else "Inactive"
+                            logger.info(f"Loaded {status_msg} stream from DB: {stream.name}")
+                            
+        except Exception as e:
+            logger.error(f"Error loading streams from DB: {str(e)}")
 
+    def reload_lost_persons_database(self):
+        """Load encodings for lost persons from the uploads directory"""
+        try:
+            if self.app:
+                with self.app.app_context():
+                    from app.models.db_models import Person
+                    persons = Person.query.all()
+                    self.lost_face_encodings = []
+                    self.lost_face_names = []
+                    
+                    count = 0
+                    for p in persons:
+                        if p.embedding:
+                            # CRITICAL FIX: The embedding loaded from DB is a Dictionary containing 'insightface' key
+                            # We must extract the vector part for the matcher
+                            if isinstance(p.embedding, dict) and 'insightface' in p.embedding:
+                                vec = np.array(p.embedding['insightface'])
+                                self.lost_face_encodings.append(vec)
+                                self.lost_face_names.append(p.name)
+                                count += 1
+                                # logger.info(f"Loaded embedding for {p.name}: shape {vec.shape}")
+                            elif isinstance(p.embedding, (list, np.ndarray)):
+                                # Fallback if somehow stored as direct list
+                                self.lost_face_encodings.append(np.array(p.embedding))
+                                self.lost_face_names.append(p.name)
+                                count += 1
+                            else:
+                                logger.warning(f"Skipping invalid embedding format for {p.name}")
+
+            logger.info(f"Loaded {count} lost persons from database")
+                        
+        except Exception as e:
+            logger.error(f"Error loading lost persons database: {str(e)}")
+
+    # Implemented using DB persistence
+    def add_stream(self, name, url, location, lat=None, lng=None):
+        """Add a new stream"""
+        if self.app:
+            try:
+                with self.app.app_context():
+                    from app.models.db_models import Stream
+                    # Create in DB
+                    new_stream = Stream(
+                        name=name,
+                        source_url=url,
+                        location=location,
+                        lat=lat,
+                        lng=lng,
+                        active=True # Default to TRUE for better UX
+                    )
+                    db.session.add(new_stream)
+                    db.session.commit()
+                    
+                    # Update active_streams
+                    self.active_streams[name] = {
+                        'name': name,
+                        'url': url,
+                        'location': location,
+                        'status': 'offline',
+                        'active': True
+                    }
+                    
+                    # Start monitoring immediately
+                    self.start_stream_monitoring(name)
+                    return True
+            except Exception as e:
+                logger.error(f"Error adding stream: {e}")
+                return False
+        return False
 
     def stop_stream(self, stream_name, remove_from_config=True):
         """Stop a specific stream monitoring"""
@@ -416,16 +308,55 @@ class CCTVManager:
             del self.stream_threads[stream_name]
             
         with self.lock:
+            # FIX: Clear the latest frame to prevent stale image
+            if stream_name in self.latest_frames:
+                del self.latest_frames[stream_name]
+            
+            # FIX: Clear latest detections to prevent stale overlays
+            if stream_name in self.latest_detections:
+                del self.latest_detections[stream_name]
+
             if stream_name in self.active_streams:
                 if remove_from_config:
                     del self.active_streams[stream_name]
                 else:
                     self.active_streams[stream_name]['status'] = 'disabled'
+        
+        # FIX: Explicitly handle Database Deletion
+        if remove_from_config and self.app:
+            try:
+                with self.app.app_context():
+                    from app.models.db_models import Stream
+                    stream_to_delete = Stream.query.filter_by(name=stream_name).first()
+                    if stream_to_delete:
+                        db.session.delete(stream_to_delete)
+                        db.session.commit()
+                        logger.info(f"🗑️ Deleted stream '{stream_name}' from database")
+                    else:
+                        logger.warning(f"Stream '{stream_name}' not found in DB for deletion")
+            except Exception as e:
+                logger.error(f"Error deleting stream from DB: {e}")
+        
+        if self.config:
+            self.load_streams_from_db()
                     
-        self.save_streams_to_db()
+        # self.save_streams_to_db() # Removed non-existent method call
 
     def set_stream_active(self, stream_name, active):
         """Enable or disable a stream"""
+        # 1. Update DB Persistently
+        if self.app:
+            try:
+                with self.app.app_context():
+                    from app.models.db_models import Stream
+                    stream = Stream.query.filter_by(name=stream_name).first()
+                    if stream:
+                        stream.active = active
+                        db.session.commit()
+                        logger.info(f"Updated DB status for {stream_name} to {active}")
+            except Exception as e:
+                logger.error(f"Error updating stream status in DB: {e}")
+
         if active:
             # UNBLOCK if explicitly enabled
             with self.lock:
@@ -434,6 +365,8 @@ class CCTVManager:
                     logger.warning(f"✅ UNBLOCKED stream {stream_name} (User explicitly enabled)")
 
             if stream_name not in self.active_streams:
+                # If not in memory but valid, try loading it? 
+                # Or just return False
                 return False
                 
             with self.lock:
@@ -746,6 +679,19 @@ class CCTVManager:
              if ret:
                  return buffer.tobytes()
              return None
+
+    def get_frame_generator(self, stream_name):
+        """Yield frames for MJPEG streaming"""
+        while self.running:
+            jpeg_bytes = self.get_current_frame(stream_name, as_base64=False)
+            
+            if jpeg_bytes:
+                yield (b'--frame\r\n'
+                       b'Content-Type: image/jpeg\r\n\r\n' + jpeg_bytes + b'\r\n')
+            else:
+                 time.sleep(0.1)
+                 
+            time.sleep(0.04) # Limit FPS
 
     def get_stream_status(self):
         with self.lock:

@@ -210,6 +210,27 @@
         </div>
     </div>
 </div>
+
+<!-- Delete Stream Confirmation Modal -->
+<div class="modal fade" id="deleteStreamModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Confirm Deletion</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>Are you sure you want to delete stream <strong id="deleteStreamName"></strong>?</p>
+                <p class="text-danger"><small>This action cannot be undone. The stream configuration will be permanently
+                        removed.</small></p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-danger" id="confirmDeleteStreamBtn">Delete Stream</button>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block extra_css %}
@@ -389,16 +410,23 @@
                             <div class="d-flex justify-content-between align-items-start">
                                 <div onclick="cctvUI.selectStream('${name}')">
                                     <h6 class="mb-1">${name}</h6>
-                                    <small class="text-muted">${info.location}</small>
+                                    <small class="text-muted">${info.location || ''}</small>
                                 </div>
                                 <div class="text-end">
-                                    <div class="form-check form-switch d-inline-block">
+                                    <div class="form-check form-switch d-inline-block" title="Toggle Stream">
                                         <input class="form-check-input" type="checkbox" id="toggle-${name}" 
                                                ${info.active ? 'checked' : ''} 
                                                onchange="cctvUI.toggleStream('${name}', this.checked)">
                                     </div>
+                                    ${name !== 'Demo Stream' ? `
+                                    <button class="btn btn-link text-danger ms-2 p-0 align-top" 
+                                            onclick="event.stopPropagation(); cctvUI.deleteStream('${name}')"
+                                            title="Delete Stream">
+                                        <i class="fas fa-trash-alt"></i>
+                                    </button>
+                                    ` : ''}
                                     <br>
-                                    <span class="badge bg-${statusClass}">
+                                    <span class="badge bg-${statusClass} mt-1">
                                         ${statusText}
                                     </span>
                                 </div>
@@ -682,6 +710,60 @@
                 document.getElementById(`toggle-${streamName}`).checked = !active;
             }
         }
+
+        async deleteStream(streamName) {
+            this.streamToDelete = streamName;
+            document.getElementById('deleteStreamName').textContent = streamName;
+            const modal = new bootstrap.Modal(document.getElementById('deleteStreamModal'));
+            modal.show();
+        }
+
+        async confirmDeleteStream() {
+            const streamName = this.streamToDelete;
+            if (!streamName) return;
+
+            const btn = document.getElementById('confirmDeleteStreamBtn');
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Deleting...';
+            btn.disabled = true;
+
+            try {
+                const response = await fetch(`/cctv/delete/${encodeURIComponent(streamName)}`, {
+                    method: 'POST'
+                });
+                const result = await response.json();
+
+                if (result.success) {
+                    if (this.currentStream === streamName) {
+                        this.currentStream = null;
+                        if (this.streamInterval) clearInterval(this.streamInterval);
+                        document.getElementById('streamViewer').innerHTML = `
+                            <div class="text-center p-5 stream-placeholder rounded border border-secondary"
+                                style="background: rgba(0,0,0,0.3);">
+                                <i class="fas fa-video-slash fa-3x text-secondary mb-3"></i>
+                                <h5 class="text-secondary">No Stream Selected</h5>
+                                <p class="text-muted">Select a stream from the list to view live footage</p>
+                            </div>
+                        `;
+                        document.getElementById('streamInfo').style.display = 'none';
+                    }
+                    this.loadStreams(); // Refresh list
+                    // Close modal
+                    const modalEl = document.getElementById('deleteStreamModal');
+                    const modal = bootstrap.Modal.getInstance(modalEl);
+                    if (modal) modal.hide();
+                } else {
+                    alert('Error deleting stream: ' + result.error);
+                }
+            } catch (error) {
+                console.error('Error deleting stream:', error);
+                alert('Failed to delete stream');
+            } finally {
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+                this.streamToDelete = null;
+            }
+        }
     }
 
 
@@ -734,6 +816,11 @@
                 initPickerMap();
             }
             pickerMap.invalidateSize();
+        });
+
+        // Delete Stream Confirmation Listener
+        document.getElementById('confirmDeleteStreamBtn').addEventListener('click', () => {
+            if (window.cctvUI) window.cctvUI.confirmDeleteStream();
         });
     });
 

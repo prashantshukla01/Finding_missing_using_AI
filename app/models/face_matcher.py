@@ -88,10 +88,20 @@ class AdvancedFaceMatcher:
         
         try:
             # We strictly expect 'insightface' keys now
-            vec1 = embedding1.get('insightface')
-            vec2 = embedding2.get('insightface')
+            # Robustness: Handle if embedding is already a list/array (legacy or raw vector)
+            if isinstance(embedding1, dict):
+                vec1 = embedding1.get('insightface')
+            else:
+                vec1 = embedding1
+
+            if isinstance(embedding2, dict):
+                vec2 = embedding2.get('insightface')
+            else:
+                vec2 = embedding2
 
             if vec1 is None or vec2 is None:
+                # Debug logging
+                # logger.warning(f"Missing insightface vector. Keys 1: {embedding1.keys() if isinstance(embedding1, dict) else 'List'}, Keys 2: {embedding2.keys() if isinstance(embedding2, dict) else 'List'}")
                 return 0.0, "INVALID_VECTOR"
             
             # Ensure numpy arrays
@@ -170,6 +180,7 @@ class AdvancedFaceMatcher:
                     # (Avoid function call overhead in inner loop if possible, or just call helper)
                     # Let's call helper for consistency, it's fast enough
                     
+                    # Fix: lost_embedding is now a direct numpy array from our unpacked list
                     sim, conf = self.compare_embeddings(
                         {'insightface': face.embedding},
                         {'insightface': lost_embedding}

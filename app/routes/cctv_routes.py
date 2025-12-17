@@ -1,7 +1,8 @@
 from flask import Blueprint, render_template, request, jsonify
+from urllib.parse import unquote
 import logging
 from datetime import datetime
-from app.models.db_models import db, Person
+from app.models.db_models import db, Person, Stream
 
 logger = logging.getLogger(__name__)
 
@@ -162,4 +163,36 @@ def toggle_stream_status(stream_name):
             
     except Exception as e:
         logger.error(f"Error toggling stream {stream_name}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@cctv_bp.route('/delete/<path:stream_name>', methods=['POST'])
+def delete_stream(stream_name):
+    """Delete a configured stream"""
+    stream_name = unquote(stream_name)
+    
+    # 1. Protect "Demo Stream" from deletion
+    if stream_name == "Demo Stream":
+        return jsonify({'success': False, 'error': 'Protected stream "Demo Stream" cannot be deleted'}), 403
+
+    try:
+        # Check if stream exists
+        if cctv_manager and stream_name in cctv_manager.active_streams:
+            cctv_manager.stop_stream(stream_name, remove_from_config=True)
+            return jsonify({'success': True, 'message': f'Stream {stream_name} deleted'})
+            
+        # Also check DB even if not active
+        stream = Stream.query.filter_by(name=stream_name).first()
+        if stream:
+            # If it was in DB but not active, force delete it
+            if cctv_manager:
+                 cctv_manager.stop_stream(stream_name, remove_from_config=True)
+            else:
+                 # Fallback direct delete
+                 db.session.delete(stream)
+                 db.session.commit()
+            return jsonify({'success': True, 'message': f'Stream {stream_name} deleted'})
+            
+        return jsonify({'success': False, 'error': 'Stream not found'}), 404
+    except Exception as e:
+        logger.error(f"Error deleting stream: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
