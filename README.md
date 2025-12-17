@@ -18,6 +18,20 @@ A comprehensive **web-based application** that uses **AI-powered face recognitio
 
 ---
 
+## 📸 Screenshots
+
+| **Landing Page** | **System Dashboard** |
+|:---:|:---:|
+| ![Landing Page](docs/screenshots/landing_page.png) | ![Dashboard](docs/screenshots/dashboard.png) |
+| *Modern Landing Page with Hero Section* | *Real-time System Dashboard* |
+
+| **CCTV Management** | **Stream Configuration** |
+|:---:|:---:|
+| ![CCTV Management](docs/screenshots/cctv_management.png) | ![Add stream](docs/screenshots/add_stream_modal.png) |
+| *Manage Multiple Camera Feeds* | *Dark UI Modal for Adding Streams* |
+
+---
+
 ## 🛠️ Technology Stack
 
 - **Backend:** Flask (Python) with Blueprints

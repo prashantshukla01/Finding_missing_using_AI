@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sentinel AI - Missing Person Detection System</title>
+    <!-- Fonts -->
+    <link
+        href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600&display=swap"
+        rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Custom CSS -->
+    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+    <style>
+        body {
+            overflow-x: hidden;
+        }
+
+        .hero-section {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            position: relative;
+            padding-top: 80px;
+        }
+
+        .hero-bg {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: -1;
+            /* Dark overlay on top of background image would go here if we used one */
+        }
+
+        .hero-content {
+            z-index: 2;
+        }
+
+        .hero-image-container {
+            position: relative;
+            z-index: 2;
+        }
+
+        .hero-image {
+            width: 100%;
+            border-radius: 20px;
+            box-shadow: 0 0 50px rgba(99, 102, 241, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            transform: perspective(1000px) rotateY(-5deg) rotateX(2deg);
+            transition: transform 0.5s ease;
+        }
+
+        .hero-image:hover {
+            transform: perspective(1000px) rotateY(0deg) rotateX(0deg);
+        }
+
+        .feature-card {
+            background: rgba(30, 41, 59, 0.4);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 1rem;
+            padding: 2rem;
+            transition: all 0.3s ease;
+            height: 100%;
+        }
+
+        .feature-card:hover {
+            transform: translateY(-10px);
+            background: rgba(30, 41, 59, 0.6);
+            border-color: var(--primary);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+        }
+
+        .feature-icon {
+            width: 60px;
+            height: 60px;
+            border-radius: 12px;
+            background: rgba(99, 102, 241, 0.1);
+            color: var(--primary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .navbar-transparent {
+            background: rgba(15, 23, 42, 0.8);
+            backdrop-filter: blur(20px);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            position: fixed;
+            width: 100%;
+            z-index: 1000;
+            top: 0;
+        }
+
+        .gradient-text {
+            background: linear-gradient(135deg, #fff 0%, #cbd5e1 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .cta-btn {
+            padding: 1rem 2.5rem;
+            font-size: 1.1rem;
+            border-radius: 50px;
+            background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+            border: none;
+            color: white;
+            box-shadow: 0 0 20px rgba(79, 70, 229, 0.4);
+            transition: all 0.3s ease;
+        }
+
+        .cta-btn:hover {
+            transform: scale(1.05);
+            box-shadow: 0 0 30px rgba(79, 70, 229, 0.6);
+            color: white;
+        }
+    </style>
+</head>
+
+<body>
+    <!-- Background Animation -->
+    <div class="bg-animation"></div>
+
+    <!-- Navbar -->
+    <nav class="navbar navbar-expand-lg navbar-dark navbar-transparent">
+        <div class="container">
+            <a class="navbar-brand d-flex align-items-center gap-2" href="#">
+                <i class="fas fa-eye text-primary fa-lg"></i>
+                <span>SENTINEL AI</span>
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto align-items-center">
+                    <li class="nav-item"><a class="nav-link" href="#features">Features</a></li>
+                    <li class="nav-item"><a class="nav-link" href="#how-it-works">How it Works</a></li>
+                    <li class="nav-item ms-lg-3">
+                        <a href="{{ url_for('main.dashboard') }}" class="btn btn-outline-light rounded-pill px-4">
+                            <i class="fas fa-sign-in-alt me-2"></i>Access Dashboard
+                        </a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <section class="hero-section">
+        <div class="container">
+            <div class="row align-items-center">
+                <div class="col-lg-6 hero-content mb-5 mb-lg-0">
+                    <div
+                        class="d-inline-block px-3 py-1 rounded-pill bg-primary bg-opacity-10 border border-primary border-opacity-25 text-primary mb-4">
+                        <i class="fas fa-bolt me-2"></i> Next-Gen Security System
+                    </div>
+                    <h1 class="display-3 fw-bold mb-4 text-white">Find the Missing using <br><span
+                            class="text-primary">AI Power</span></h1>
+                    <p class="lead text-muted mb-5">
+                        Deploy advanced face recognition technology across your CCTV network. Detect missing persons in
+                        real-time with sub-second latency and 99.8% accuracy.
+                    </p>
+                    <div class="d-flex gap-3">
+                        <a href="{{ url_for('main.dashboard') }}" class="cta-btn text-decoration-none">
+                            Launch System <i class="fas fa-arrow-right ms-2"></i>
+                        </a>
+                        <a href="#demo" class="btn btn-outline-light rounded-pill px-4 py-3 d-flex align-items-center">
+                            <i class="fas fa-play me-2"></i> Watch Demo
+                        </a>
+                    </div>
+
+                    <div class="mt-5 d-flex gap-5 text-muted">
+                        <div>
+                            <h3 class="fw-bold text-white mb-0">99%</h3>
+                            <small>Accuracy</small>
+                        </div>
+                        <div>
+                            <h3 class="fw-bold text-white mb-0">
+                                < 100ms</h3>
+                                    <small>Latency</small>
+                        </div>
+                        <div>
+                            <h3 class="fw-bold text-white mb-0">24/7</h3>
+                            <small>Monitoring</small>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-lg-6 hero-image-container">
+                    <img src="{{ url_for('static', filename='images/landing_hero.png') }}" class="hero-image"
+                        alt="Sentinel AI Dashboard Interface">
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Features Section -->
+    <section id="features" class="py-5">
+        <div class="container py-5">
+            <div class="text-center mb-5">
+                <h2 class="display-5 fw-bold mb-3">Enterprise Grade capabilities</h2>
+                <p class="text-muted lead">Built for city-scale surveillance and rapid response.</p>
+            </div>
+
+            <div class="row g-4">
+                <div class="col-md-4">
+                    <div class="feature-card">
+                        <div class="feature-icon">
+                            <i class="fas fa-user-tag"></i>
+                        </div>
+                        <h4>Real-time Recognition</h4>
+                        <p class="text-muted">Process multiple streams simultaneously using InsightFace algorithms.
+                            Identify individuals instantly even in crowded scenes.</p>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="feature-card">
+                        <div class="feature-icon">
+                            <i class="fas fa-network-wired"></i>
+                        </div>
+                        <h4>Multi-Stream Integration</h4>
+                        <p class="text-muted">Connect unlimited IP Cameras via RTSP or use USB webcams. Centralized
+                            management dashboard for all your feeds.</p>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="feature-card">
+                        <div class="feature-icon">
+                            <i class="fas fa-shield-alt"></i>
+                        </div>
+                        <h4>Secure & Private</h4>
+                        <p class="text-muted">Data stays on your local server. No cloud dependency. Encrypted database
+                            storage for sensitive personnel data.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="py-4 border-top border-white border-opacity-10 mt-5">
+        <div class="container text-center text-muted">
+            <p class="mb-0">© 2025 Sentinel AI. Missing Person Detection System.</p>
+        </div>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+
+</html>
