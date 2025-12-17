@@ -29,7 +29,9 @@
         <!-- Sidebar -->
         <div class="glass-sidebar" id="sidebar-wrapper">
             <div class="sidebar-heading text-center py-4 primary-text fs-4 fw-bold text-uppercase border-bottom">
-                <i class="fas fa-eye me-2"></i>Sentinel
+                <a href="{{ url_for('main.index') }}" class="text-decoration-none text-light">
+                    <i class="fas fa-eye me-2"></i>Sentinel
+                </a>
             </div>
             <div class="list-group list-group-flush my-3">
                 <a href="{{ url_for('cctv.dashboard') }}"
@@ -52,7 +54,8 @@
                     class="list-group-item list-group-item-action bg-transparent second-text fw-bold">
                     <i class="fas fa-map-marked-alt me-2"></i>Map
                 </a>
-                <a href="#" class="list-group-item list-group-item-action bg-transparent second-text fw-bold">
+                <a href="{{ url_for('settings.settings_page') }}"
+                    class="list-group-item list-group-item-action bg-transparent second-text fw-bold">
                     <i class="fas fa-cog me-2"></i>Settings
                 </a>
             </div>

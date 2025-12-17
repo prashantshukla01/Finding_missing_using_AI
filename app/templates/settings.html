@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+
+{% block title %}System Settings - Missing Person Detection System{% endblock %}
+
+{% block page_title %}Settings{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8 col-lg-6">
+        <div class="card glass-card">
+            <div class="card-header bg-transparent border-bottom">
+                <h5 class="card-title mb-0"><i class="fas fa-cog me-2"></i>System Configuration</h5>
+            </div>
+            <div class="card-body">
+                <form id="settingsForm">
+                    <!-- Face Recognition Settings -->
+                    <h6 class="text-uppercase text-muted mb-3 fs-7 ls-1">Face Recognition</h6>
+
+                    <div class="mb-4">
+                        <label for="detectionThreshold" class="form-label d-flex justify-content-between">
+                            <span>Detection Confidence Threshold</span>
+                            <span class="badge bg-primary" id="thresholdValue">0.60</span>
+                        </label>
+                        <input type="range" class="form-range" id="detectionThreshold" min="0.3" max="0.9" step="0.05">
+                        <div class="form-text">Minimum confidence score required to consider a face match valid. Higher
+                            values reduce false positives.</div>
+                    </div>
+
+                    <div class="mb-4">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="enableUnknownAlerts">
+                            <label class="form-check-label" for="enableUnknownAlerts">Alert on Unknown Faces</label>
+                        </div>
+                        <div class="form-text">Send alerts when faces are detected that don't match any missing person.
+                        </div>
+                    </div>
+
+                    <hr class="dropdown-divider my-4">
+
+                    <!-- Data Management -->
+                    <h6 class="text-uppercase text-muted mb-3 fs-7 ls-1">Data Management</h6>
+
+                    <div class="mb-4">
+                        <label for="retentionDays" class="form-label">Data Retention (Days)</label>
+                        <select class="form-select" id="retentionDays">
+                            <option value="7">7 Days</option>
+                            <option value="14">14 Days</option>
+                            <option value="30">30 Days</option>
+                            <option value="90">90 Days</option>
+                            <option value="-1">Indefinite (Forever)</option>
+                        </select>
+                        <div class="form-text">Automatically delete detection history older than this period.</div>
+                    </div>
+
+                    <hr class="dropdown-divider my-4">
+
+                    <!-- advanced -->
+                    <h6 class="text-uppercase text-muted mb-3 fs-7 ls-1">Advanced</h6>
+
+                    <div class="mb-4">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="debugMode">
+                            <label class="form-check-label" for="debugMode">Enable Debug Mode</label>
+                        </div>
+                        <div class="form-text text-warning"><i class="fas fa-exclamation-triangle me-1"></i> Produces
+                            verbose logs. Not recommended for production.</div>
+                    </div>
+
+                    <div class="d-grid gap-2">
+                        <button type="button" class="btn btn-primary btn-lg" onclick="saveSettings()">
+                            <i class="fas fa-save me-2"></i>Save Configuration
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // Initial Load
+    document.addEventListener('DOMContentLoaded', loadSettings);
+
+    const thresholdInput = document.getElementById('detectionThreshold');
+    const thresholdBadge = document.getElementById('thresholdValue');
+
+    thresholdInput.addEventListener('input', (e) => {
+        thresholdBadge.textContent = parseFloat(e.target.value).toFixed(2);
+    });
+
+    async function loadSettings() {
+        try {
+            const response = await fetch('/settings/api/get');
+            const data = await response.json();
+
+            if (data.success) {
+                const settings = data.settings;
+
+                // Threshold
+                const threshold = settings.detection_threshold || 0.6;
+                thresholdInput.value = threshold;
+                thresholdBadge.textContent = parseFloat(threshold).toFixed(2);
+
+                // Toggles
+                document.getElementById('enableUnknownAlerts').checked = settings.unknown_alerts === 'true';
+                document.getElementById('debugMode').checked = settings.debug_mode === 'true';
+
+                // Select
+                document.getElementById('retentionDays').value = settings.retention_days || "30";
+            }
+        } catch (error) {
+            console.error('Error loading settings:', error);
+            alert('Failed to load current settings.');
+        }
+    }
+
+    async function saveSettings() {
+        const btn = document.querySelector('button[onclick="saveSettings()"]');
+        const originalText = btn.innerHTML;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Saving...';
+        btn.disabled = true;
+
+        const settings = {
+            detection_threshold: document.getElementById('detectionThreshold').value,
+            unknown_alerts: document.getElementById('enableUnknownAlerts').checked,
+            retention_days: document.getElementById('retentionDays').value,
+            debug_mode: document.getElementById('debugMode').checked
+        };
+
+        try {
+            const response = await fetch('/settings/api/save', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(settings)
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                // Show success toast or alert
+                const alertHtml = `
+                    <div class="alert alert-success alert-dismissible fade show fixed-top m-3" style="z-index: 1050; max-width: 400px; left: 50%; transform: translateX(-50%);">
+                        <i class="fas fa-check-circle me-2"></i>Configuration saved successfully!
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    </div>
+                `;
+                document.body.insertAdjacentHTML('beforeend', alertHtml);
+
+                // Auto dismiss
+                setTimeout(() => {
+                    const alert = document.querySelector('.alert-success');
+                    if (alert) {
+                        const bsAlert = new bootstrap.Alert(alert);
+                        bsAlert.close();
+                    }
+                }, 3000);
+            } else {
+                alert('Error saving settings: ' + result.error);
+            }
+        } catch (error) {
+            console.error('Error saving settings:', error);
+            alert('Failed to save settings.');
+        } finally {
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+        }
+    }
+</script>
+{% endblock %}

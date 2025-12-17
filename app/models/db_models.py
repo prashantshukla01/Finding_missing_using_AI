@@ -109,3 +109,29 @@ class Detection(db.Model):
             'confidence': self.confidence,
             'location': self.stream.location if self.stream else "Unknown"
         }
+
+class SystemSettings(db.Model):
+    __tablename__ = 'system_settings'
+    
+    key = db.Column(db.String(50), primary_key=True)
+    value = db.Column(db.String(500)) # Store values as strings, convert on usage
+    description = db.Column(db.String(200))
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    @staticmethod
+    def get_value(key, default=None):
+        setting = SystemSettings.query.get(key)
+        return setting.value if setting else default
+
+    @staticmethod
+    def set_value(key, value, description=None):
+        setting = SystemSettings.query.get(key)
+        if not setting:
+            setting = SystemSettings(key=key, value=str(value), description=description)
+            db.session.add(setting)
+        else:
+            setting.value = str(value)
+            if description:
+                setting.description = description
+        db.session.commit()
+        return setting

@@ -59,7 +59,9 @@ def create_app(config_name='default'):
     from app.routes.person_routes import init_person_routes, person_bp
     from app.routes.cctv_routes import init_cctv_routes, cctv_bp
     from app.routes.api_routes import init_api_routes, api_bp
+    from app.routes.api_routes import init_api_routes, api_bp
     from app.routes.main_routes import main_bp
+    from app.routes.settings_routes import settings_bp
     
     init_person_routes(app_config, face_matcher, cctv_manager)
     init_cctv_routes(app_config, cctv_manager, face_matcher)
@@ -70,6 +72,7 @@ def create_app(config_name='default'):
     app.register_blueprint(cctv_bp)
     app.register_blueprint(api_bp)
     app.register_blueprint(main_bp)
+    app.register_blueprint(settings_bp)
 
     # Setup test/demo streams (logic moved here or into a utils function)
     # For now, we keep the simple structure
